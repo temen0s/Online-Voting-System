@@ -1,12 +1,17 @@
--- 1. Elections Table
+-- 1. Create Database if it doesn't exist
+CREATE DATABASE IF NOT EXISTS voting_system;
+USE voting_system;
+
+-- 2. Elections Table (Includes the missing ends_at column for time limits)
 CREATE TABLE IF NOT EXISTS elections (
     election_id INT AUTO_INCREMENT PRIMARY KEY,
     title VARCHAR(150) NOT NULL,
     status ENUM('draft', 'active', 'closed') DEFAULT 'draft',
+    ends_at DATETIME DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 2. Categories Table (Positions like President, Secretary)
+-- 3. Categories Table (e.g., President, Secretary)
 CREATE TABLE IF NOT EXISTS categories (
     category_id INT AUTO_INCREMENT PRIMARY KEY,
     election_id INT NOT NULL,
@@ -14,7 +19,7 @@ CREATE TABLE IF NOT EXISTS categories (
     FOREIGN KEY (election_id) REFERENCES elections(election_id) ON DELETE CASCADE
 );
 
--- 3. Candidates Table
+-- 4. Candidates Table
 CREATE TABLE IF NOT EXISTS candidates (
     candidate_id INT AUTO_INCREMENT PRIMARY KEY,
     category_id INT NOT NULL,
@@ -23,7 +28,7 @@ CREATE TABLE IF NOT EXISTS candidates (
     FOREIGN KEY (category_id) REFERENCES categories(category_id) ON DELETE CASCADE
 );
 
--- 4. Voter Identity Table
+-- 5. Voter Identity Table
 CREATE TABLE IF NOT EXISTS voter_identity (
     university_id VARCHAR(20) PRIMARY KEY,
     full_name VARCHAR(100) NOT NULL,
@@ -31,7 +36,7 @@ CREATE TABLE IF NOT EXISTS voter_identity (
     has_voted TINYINT(1) DEFAULT 0
 );
 
--- 5. Ballot Box Table (Decoupled to preserve voter anonymity)
+-- 6. Ballot Box Table (Decoupled to preserve voter anonymity)
 CREATE TABLE IF NOT EXISTS ballot_box (
     vote_id VARCHAR(36) PRIMARY KEY,
     election_id INT NOT NULL,
@@ -41,21 +46,25 @@ CREATE TABLE IF NOT EXISTS ballot_box (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 7. Admins Table
+CREATE TABLE IF NOT EXISTS admins (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) NOT NULL UNIQUE,
+    password VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- --------------------------------------------------------
+-- SEED SAMPLE DATA
+-- --------------------------------------------------------
+
 -- Seed Sample Student Test Accounts
 INSERT INTO voter_identity (university_id, full_name, otp_code, has_voted) VALUES
 ('UNI-2026-001', 'Alex Smith', '123456', 0),
 ('UNI-2026-002', 'Jordan Lee', '654321', 0)
 ON DUPLICATE KEY UPDATE university_id=university_id;
 
--- 1. Create the admins table
-CREATE TABLE IF NOT EXISTS `admins` (
-  `id` INT AUTO_INCREMENT PRIMARY KEY,
-  `username` VARCHAR(50) NOT NULL UNIQUE,
-  `password` VARCHAR(255) NOT NULL,
-  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- 2. Insert a default admin account (Username: admin, Password: adminpassword123)
-INSERT INTO `admins` (`username`, `password`) 
+-- Seed Default Admin Account (Username: admin, Password: admin123)
+INSERT INTO admins (username, password) 
 VALUES ('admin', 'admin123')
-ON DUPLICATE KEY UPDATE `username`=`username`;
+ON DUPLICATE KEY UPDATE username=username;

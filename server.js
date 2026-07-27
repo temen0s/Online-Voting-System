@@ -9,21 +9,19 @@ const PORT = 3000;
 const JWT_SECRET = 'your-local-secret-key-change-in-production';
 
 app.use(express.json());
-
-// Serve frontend HTML/CSS/JS files from the "public" folder
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Connection Pool for XAMPP MySQL
 const db = mysql.createPool({
     host: 'localhost',
     user: 'root',
-    password: '',      // Default XAMPP MySQL password is empty
+    password: '', // Default XAMPP MySQL password
     database: 'voting_system',
     waitForConnections: true,
     connectionLimit: 10
 });
 
-// Middleware: Verify Token
+// Middleware: Verify Voter JWT Token
 function verifyVotingToken(req, res, next) {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
@@ -41,46 +39,24 @@ function verifyVotingToken(req, res, next) {
 // ADMIN API ENDPOINTS
 // -------------------------------------------------------------------
 
-// 0. Admin Login (Database-driven)
+// Admin Login
 app.post('/api/admin/login', async (req, res) => {
     const { username, password } = req.body;
-
-    if (!username || !password) {
-        return res.status(400).json({ error: 'Username and password are required.' });
-    }
-
     try {
-        const [rows] = await db.query(
-            'SELECT * FROM admins WHERE username = ? AND password = ?',
-            [username, password]
-        );
-
+        const [rows] = await db.query('SELECT * FROM admins WHERE username = ? AND password = ?', [username, password]);
         if (rows.length === 0) {
-            return res.status(401).json({ error: 'Invalid username or password.' });
+            return res.status(401).json({ error: 'Invalid admin credentials.' });
         }
-
-        const admin = rows[0];
-        const token = jwt.sign(
-            { id: admin.id, username: admin.username, role: 'admin' },
-            JWT_SECRET,
-            { expiresIn: '2h' }
-        );
-
-        res.json({
-            success: true,
-            message: 'Login successful',
-            token: token
-        });
+        const adminToken = jwt.sign({ adminId: rows[0].admin_id, role: 'admin' }, JWT_SECRET, { expiresIn: '2h' });
+        res.json({ success: true, token: adminToken });
     } catch (err) {
-        console.error('Database error during admin login:', err);
-        res.status(500).json({ error: 'Database error during admin login.' });
+        res.status(500).json({ error: 'Database error during admin authentication.' });
     }
 });
 
-// 1. Setup Election Draft
+// Setup Election Draft
 app.post('/api/admin/setup-election', async (req, res) => {
     const { title, categories } = req.body;
-
     if (!title || !categories || !Array.isArray(categories)) {
         return res.status(400).json({ error: 'Invalid setup payload.' });
     }
@@ -114,19 +90,44 @@ app.post('/api/admin/setup-election', async (req, res) => {
     }
 });
 
-// 2. Start Election ("Push GO")
+// Start Election ("Push GO") with optional Time Limit
 app.post('/api/admin/start-election', async (req, res) => {
-    const { electionId } = req.body;
-
+    const { electionId, durationMinutes } = req.body;
     try {
-        await db.query('UPDATE elections SET status = "closed"');
-        await db.query('UPDATE elections SET status = "active" WHERE election_id = ?', [electionId]);
+        await db.query('UPDATE elections SET status = "closed" WHERE status = "active"');
+
+        let endsAt = null;
+        if (durationMinutes && parseInt(durationMinutes) > 0) {
+            const now = new Date();
+            endsAt = new Date(now.getTime() + parseInt(durationMinutes) * 60000);
+        }
+
+        await db.query(
+            'UPDATE elections SET status = "active", ends_at = ? WHERE election_id = ?',
+            [endsAt, electionId]
+        );
+
         await db.query('UPDATE voter_identity SET has_voted = 0');
 
-        res.json({ success: true, message: `Election #${electionId} is now LIVE for voting!` });
+        res.json({ 
+            success: true, 
+            message: `Election #${electionId} is now LIVE!`,
+            endsAt: endsAt
+        });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Failed to activate election.' });
+    }
+});
+
+// Manual "End Election"
+app.post('/api/admin/end-election', async (req, res) => {
+    try {
+        await db.query('UPDATE elections SET status = "closed" WHERE status = "active"');
+        res.json({ success: true, message: 'Election has been closed successfully.' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to close election.' });
     }
 });
 
@@ -134,22 +135,20 @@ app.post('/api/admin/start-election', async (req, res) => {
 // STUDENT / VOTER API ENDPOINTS
 // -------------------------------------------------------------------
 
-// 1. Student Login
+// Student Login
 app.post('/api/auth', async (req, res) => {
     const { university_id, otp } = req.body;
-
     try {
         const [rows] = await db.query('SELECT * FROM voter_identity WHERE university_id = ?', [university_id]);
         if (rows.length === 0) return res.status(404).json({ error: 'Invalid University ID.' });
 
         const student = rows[0];
         if (student.otp_code !== otp) return res.status(401).json({ error: 'Invalid OTP code.' });
-        if (student.has_voted === 1) return res.status(403).json({ error: 'Security Alert: You have already voted.' });
 
         const token = jwt.sign(
             { universityId: student.university_id, authorized: true },
             JWT_SECRET,
-            { expiresIn: '30m' }
+            { expiresIn: '2h' }
         );
 
         res.json({ message: 'Login successful.', token });
@@ -158,15 +157,43 @@ app.post('/api/auth', async (req, res) => {
     }
 });
 
-// 2. Get Active Election
+// Check Voter Status
+app.get('/api/voter/status', verifyVotingToken, async (req, res) => {
+    try {
+        const [voter] = await db.query('SELECT has_voted FROM voter_identity WHERE university_id = ?', [req.voterSession.universityId]);
+        if (voter.length === 0) return res.status(404).json({ error: 'Voter not found.' });
+        res.json({ hasVoted: Boolean(voter[0].has_voted) });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch voter status.' });
+    }
+});
+
+// Get All Elections (Active & Closed Overview)
+app.get('/api/elections/overview', async (req, res) => {
+    try {
+        const [elections] = await db.query('SELECT election_id, title, status, ends_at FROM elections WHERE status IN ("active", "closed") ORDER BY election_id DESC');
+        res.json({ elections });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch elections overview.' });
+    }
+});
+
+// Get Active Election Ballot (Auto-checks expiration timer)
 app.get('/api/election/active', async (req, res) => {
     try {
         const [elections] = await db.query('SELECT * FROM elections WHERE status = "active" LIMIT 1');
+
         if (elections.length === 0) {
             return res.status(404).json({ error: 'No active election found at this time.' });
         }
 
         const activeElection = elections[0];
+
+        if (activeElection.ends_at && new Date() > new Date(activeElection.ends_at)) {
+            await db.query('UPDATE elections SET status = "closed" WHERE election_id = ?', [activeElection.election_id]);
+            return res.status(404).json({ error: 'Election has ended due to time limit expiration.' });
+        }
+
         const [categories] = await db.query('SELECT * FROM categories WHERE election_id = ?', [activeElection.election_id]);
 
         for (let cat of categories) {
@@ -177,6 +204,7 @@ app.get('/api/election/active', async (req, res) => {
         res.json({
             electionId: activeElection.election_id,
             title: activeElection.title,
+            endsAt: activeElection.ends_at,
             categories
         });
     } catch (err) {
@@ -184,9 +212,35 @@ app.get('/api/election/active', async (req, res) => {
     }
 });
 
-// 3. Cast Vote
+// Get Live / Final Results for an Election
+app.get('/api/election/:id/results', async (req, res) => {
+    const electionId = req.params.id;
+    try {
+        const [categories] = await db.query('SELECT * FROM categories WHERE election_id = ?', [electionId]);
+
+        for (let cat of categories) {
+            const [candidates] = await db.query(`
+                SELECT c.candidate_id, c.candidate_name, c.party, 
+                       COUNT(b.vote_id) AS vote_count
+                FROM candidates c
+                LEFT JOIN ballot_box b ON c.candidate_id = b.candidate_id
+                WHERE c.category_id = ?
+                GROUP BY c.candidate_id
+                ORDER BY vote_count DESC
+            `, [cat.category_id]);
+
+            cat.candidates = candidates;
+        }
+
+        res.json({ electionId, categories });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to load election results.' });
+    }
+});
+
+// Cast Vote
 app.post('/api/vote', verifyVotingToken, async (req, res) => {
-    const { electionId, votes } = req.body; 
+    const { electionId, votes } = req.body;
     const { universityId } = req.voterSession;
 
     if (!votes || !Array.isArray(votes) || votes.length === 0) {
@@ -194,9 +248,14 @@ app.post('/api/vote', verifyVotingToken, async (req, res) => {
     }
 
     try {
-        const [elec] = await db.query('SELECT status FROM elections WHERE election_id = ?', [electionId]);
+        const [elec] = await db.query('SELECT status, ends_at FROM elections WHERE election_id = ?', [electionId]);
         if (elec.length === 0 || elec[0].status !== 'active') {
             return res.status(400).json({ error: 'Election is closed or inactive.' });
+        }
+
+        if (elec[0].ends_at && new Date() > new Date(elec[0].ends_at)) {
+            await db.query('UPDATE elections SET status = "closed" WHERE election_id = ?', [electionId]);
+            return res.status(400).json({ error: 'Election has expired.' });
         }
 
         const [voter] = await db.query('SELECT has_voted FROM voter_identity WHERE university_id = ?', [universityId]);
@@ -204,10 +263,8 @@ app.post('/api/vote', verifyVotingToken, async (req, res) => {
             return res.status(403).json({ error: 'You have already submitted your ballot.' });
         }
 
-        // Mark student status as voted first
         await db.query('UPDATE voter_identity SET has_voted = 1 WHERE university_id = ?', [universityId]);
 
-        // Insert unlinked choice into ballot_box
         const receiptHashes = [];
         for (const item of votes) {
             const voteId = crypto.randomUUID();

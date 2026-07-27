@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    
+    <script>
+        const adminToken = localStorage.getItem('adminToken');
+        if (!adminToken) {
+            window.location.href = '/admin-login.html';
+        }
+    </script>
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Setup Election</title>
+    <style>
+        body { font-family: sans-serif; background: #f1f5f9; padding: 20px; }
+        .card { background: white; padding: 25px; max-width: 650px; margin: 0 auto; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); position: relative; }
+        .header-box { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .header-box h2 { margin: 0; }
+        .btn-logout { background: #dc3545; color: white; border: none; padding: 8px 16px; border-radius: 4px; font-weight: bold; cursor: pointer; width: auto; margin-bottom: 0; }
+        .btn-logout:hover { background: #bb2d3b; }
+        .group { margin-bottom: 15px; }
+        label { font-weight: bold; display: block; margin-bottom: 5px; }
+        input, button { width: 100%; padding: 10px; box-sizing: border-box; margin-bottom: 10px; }
+        .category-box { border: 1px solid #cbd5e1; padding: 15px; border-radius: 6px; margin-bottom: 15px; }
+        .btn-go { background: #16a34a; color: white; border: none; font-size: 1.1rem; font-weight: bold; cursor: pointer; }
+        .btn-save { background: #2563eb; color: white; border: none; font-size: 1rem; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="header-box">
+            <h2>Election Setup (Admin)</h2>
+            <button class="btn-logout" onclick="logoutAdmin()">Logout</button>
+        </div>
+
+        <div class="group">
+            <label>Election Title</label>
+            <input type="text" id="electionTitle" placeholder="e.g. Campus Elections 2026">
+        </div>
+
+        <div id="categoriesContainer"></div>
+
+        <button onclick="addCategoryField()">+ Add Category</button>
+        <button class="btn-save" onclick="saveDraft()">1. Save Election Setup</button>
+        <button class="btn-go" onclick="pushGo()">2. PUSH "GO" (Activate Election)</button>
+        
+        <p id="statusMsg"></p>
+    </div>
+
+    <script>
+        let categoryCount = 0;
+        let createdElectionId = null;
+
+        // Logout function
+        function logoutAdmin() {
+            localStorage.removeItem('adminToken');
+            window.location.href = '/admin-login.html';
+        }
+
+        function addCategoryField() {
+            categoryCount++;
+            const container = document.getElementById('categoriesContainer');
+            const div = document.createElement('div');
+            div.className = 'category-box';
+            div.innerHTML = `
+                <h4>Category ${categoryCount}</h4>
+                <input type="text" class="cat-name" placeholder="Position Name (e.g., President)">
+                <label>Candidates (comma separated)</label>
+                <input type="text" class="cat-cands" placeholder="Candidate A, Candidate B, Candidate C">
+            `;
+            container.appendChild(div);
+        }
+
+        async function saveDraft() {
+            const title = document.getElementById('electionTitle').value;
+            const boxes = document.querySelectorAll('.category-box');
+            const categories = [];
+
+            boxes.forEach(box => {
+                const name = box.querySelector('.cat-name').value;
+                const candsRaw = box.querySelector('.cat-cands').value.split(',');
+                const candidates = candsRaw.map(c => ({ name: c.trim(), party: 'Independent' }));
+                categories.push({ name, candidates });
+            });
+
+            const res = await fetch('/api/admin/setup-election', {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+                },
+                body: JSON.stringify({ title, categories })
+            });
+
+            const data = await res.json();
+            if (data.success) {
+                createdElectionId = data.electionId;
+                document.getElementById('statusMsg').innerText = `Saved as Draft! Election ID: ${createdElectionId}`;
+            } else {
+                alert(data.error || 'Failed to save setup.');
+            }
+        }
+
+        async function pushGo() {
+            if (!createdElectionId) return alert("Please save the election setup first!");
+            const res = await fetch('/api/admin/start-election', {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+                },
+                body: JSON.stringify({ electionId: createdElectionId })
+            });
+            const data = await res.json();
+            document.getElementById('statusMsg').innerText = data.message;
+        }
+
+        addCategoryField();
+    </script>
+</body>
+</html>

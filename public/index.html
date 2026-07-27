@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Student Voting Portal</title>
+    <style>
+        body { font-family: sans-serif; background: #f8fafc; padding: 20px; }
+        .card { background: white; padding: 25px; max-width: 500px; margin: 0 auto; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        .hidden { display: none; }
+        input, button { width: 100%; padding: 10px; margin-bottom: 12px; box-sizing: border-box; }
+        button { background: #1e3a8a; color: white; border: none; font-weight: bold; cursor: pointer; }
+        .candidate-opt { display: block; background: #f1f5f9; padding: 10px; margin-bottom: 8px; border-radius: 6px; }
+        .receipt { background: #e2e8f0; font-family: monospace; padding: 10px; word-break: break-all; font-size: 0.8rem; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>Campus Voting Portal</h2>
+
+        <div id="sec-login">
+            <input type="text" id="uniId" placeholder="University ID (e.g. UNI-2026-001)">
+            <input type="password" id="otp" placeholder="OTP (e.g. 123456)">
+            <button onclick="login()">Login & Authenticate</button>
+        </div>
+
+        <div id="sec-ballot" class="hidden">
+            <h3 id="electionTitle"></h3>
+            <div id="ballotContainer"></div>
+            <button onclick="submitVote()">Encrypt & Cast Ballot</button>
+        </div>
+
+        <div id="sec-receipt" class="hidden">
+            <h3 style="color: green;">✓ Vote Cast Successfully</h3>
+            <p>Your cryptographic receipts (SHA-256):</p>
+            <div id="receiptContainer"></div>
+        </div>
+    </div>
+
+    <script>
+        let jwtToken = '';
+        let currentElectionId = null;
+
+        async function login() {
+            const university_id = document.getElementById('uniId').value;
+            const otp = document.getElementById('otp').value;
+
+            const res = await fetch('/api/auth', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ university_id, otp })
+            });
+
+            const data = await res.json();
+            if (res.ok) {
+                jwtToken = data.token;
+                loadBallot();
+            } else {
+                alert(data.error);
+            }
+        }
+
+        async function loadBallot() {
+            const res = await fetch('/api/election/active');
+            const data = await res.json();
+
+            if (!res.ok) return alert(data.error);
+
+            currentElectionId = data.electionId;
+            document.getElementById('electionTitle').innerText = data.title;
+
+            const container = document.getElementById('ballotContainer');
+            container.innerHTML = '';
+
+            data.categories.forEach(cat => {
+                let html = `<h4>${cat.category_name}</h4>`;
+                cat.candidates.forEach(cand => {
+                    html += `
+                        <label class="candidate-opt">
+                            <input type="radio" name="cat_${cat.category_id}" value="${cand.candidate_id}">
+                            ${cand.candidate_name} (${cand.party})
+                        </label>
+                    `;
+                });
+                container.innerHTML += html;
+            });
+
+            document.getElementById('sec-login').classList.add('hidden');
+            document.getElementById('sec-ballot').classList.remove('hidden');
+        }
+
+        async function submitVote() {
+            const votes = [];
+            const radios = document.querySelectorAll('input[type="radio"]:checked');
+
+            radios.forEach(r => {
+                const categoryId = parseInt(r.name.replace('cat_', ''));
+                const candidateId = parseInt(r.value);
+                votes.push({ categoryId, candidateId });
+            });
+
+            if (votes.length === 0) return alert("Please make at least one selection.");
+
+            const res = await fetch('/api/vote', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${jwtToken}`
+                },
+                body: JSON.stringify({ electionId: currentElectionId, votes })
+            });
+
+            const data = await res.json();
+            if (res.ok) {
+                document.getElementById('sec-ballot').classList.add('hidden');
+                document.getElementById('sec-receipt').classList.remove('hidden');
+                
+                const container = document.getElementById('receiptContainer');
+                data.receipts.forEach(hash => {
+                    container.innerHTML += `<div class="receipt">${hash}</div>`;
+                });
+            } else {
+                alert(data.error);
+            }
+        }
+    </script>
+</body>
+</html>

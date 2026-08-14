@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Portal - Online Voting System</title>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f4f6f9; margin: 0; padding: 20px; }
+        .container { max-width: 800px; margin: auto; background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #eee; padding-bottom: 15px; }
+        .btn { padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .btn-primary { background: #007bff; color: white; }
+        .btn-success { background: #28a745; color: white; }
+        .btn-danger { background: #dc3545; color: white; }
+        .btn-link { background: none; color: #007bff; text-decoration: underline; font-weight: normal; padding: 0; }
+        .card { border: 1px solid #ddd; padding: 15px; border-radius: 6px; margin-top: 15px; background: #fafafa; }
+        .badge { padding: 4px 8px; border-radius: 4px; color: white; font-size: 12px; font-weight: bold; }
+        .badge-active { background: #28a745; }
+        .badge-closed { background: #6c757d; }
+        .winner-tag { color: #28a745; font-weight: bold; margin-left: 10px; }
+        .candidate-option { display: flex; justify-content: space-between; margin: 8px 0; padding: 10px; border: 1px solid #eee; background: white; border-radius: 4px; }
+        .auth-tabs { display: flex; gap: 10px; margin-bottom: 15px; }
+        .auth-tab { flex: 1; padding: 10px; text-align: center; cursor: pointer; border-bottom: 3px solid transparent; font-weight: bold; color: #888; }
+        .auth-tab.active { color: #007bff; border-bottom-color: #007bff; }
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; margin-bottom: 4px; font-weight: bold; color: #555; font-size: 14px; }
+        .form-group input { width: 100%; padding: 9px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        .msg { margin-top: 12px; padding: 10px; border-radius: 4px; font-size: 14px; display: none; }
+        .msg-error { background: #fdecea; color: #dc3545; }
+        .msg-success { background: #e9f9ee; color: #1e7e34; }
+        .hint { font-size: 12px; color: #888; margin-top: -6px; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div id="authSection">
+        <h2>Student Portal</h2>
+
+        <div class="auth-tabs">
+            <div class="auth-tab active" id="tabLogin" onclick="switchTab('login')">Login</div>
+            <div class="auth-tab" id="tabRegister" onclick="switchTab('register')">Register</div>
+        </div>
+
+        <!-- LOGIN -->
+        <div id="loginPane">
+            <div class="form-group">
+                <label>University ID</label>
+                <input type="text" id="loginUniId" placeholder="e.g. STU1001">
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="loginPassword" placeholder="Your password">
+            </div>
+            <button onclick="login()" class="btn btn-primary">Login to Dashboard</button>
+        </div>
+
+        <!-- REGISTER (step 1) -->
+        <div id="registerPane" style="display:none;">
+            <div class="form-group">
+                <label>University ID</label>
+                <input type="text" id="regUniId" placeholder="e.g. STU1001">
+            </div>
+            <div class="form-group">
+                <label>Full Name</label>
+                <input type="text" id="regFullName" placeholder="Your full name">
+            </div>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="regEmail" placeholder="you@university.edu">
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="regPassword" placeholder="At least 6 characters">
+            </div>
+            <button onclick="register()" class="btn btn-primary">Send OTP to Email</button>
+        </div>
+
+        <!-- REGISTER (step 2: OTP) -->
+        <div id="otpPane" style="display:none;">
+            <p>We emailed a 6-digit code to <strong id="otpEmailDisplay"></strong>. Enter it below to activate your account.</p>
+            <div class="form-group">
+                <label>OTP Code</label>
+                <input type="text" id="otpCode" placeholder="123456" maxlength="6">
+            </div>
+            <button onclick="verifyOtp()" class="btn btn-success">Verify & Activate Account</button>
+            <button onclick="resendOtp()" class="btn btn-link" style="margin-left:10px;">Resend code</button>
+        </div>
+
+        <div id="authMsg" class="msg"></div>
+    </div>
+
+    <div id="dashboardSection" style="display: none;">
+        <div class="header">
+            <h2>Student Dashboard</h2>
+            <button onclick="logout()" class="btn btn-danger">Logout</button>
+        </div>
+
+        <h3>Elections Overview</h3>
+        <div id="electionsList"></div>
+
+        <div id="electionDetailView" class="card" style="display: none;"></div>
+    </div>
+</div>
+
+<script>
+    let voterToken = localStorage.getItem('voterToken');
+    let pendingUniId = null; // set after register(), used by verifyOtp()/resendOtp()
+
+    if (voterToken) {
+        showDashboard();
+    }
+
+    function switchTab(tab) {
+        document.getElementById('tabLogin').classList.toggle('active', tab === 'login');
+        document.getElementById('tabRegister').classList.toggle('active', tab === 'register');
+        document.getElementById('loginPane').style.display = tab === 'login' ? 'block' : 'none';
+        document.getElementById('registerPane').style.display = tab === 'register' ? 'block' : 'none';
+        document.getElementById('otpPane').style.display = 'none';
+        hideMsg();
+    }
+
+    function showMsg(text, isError) {
+        const el = document.getElementById('authMsg');
+        el.textContent = text;
+        el.className = 'msg ' + (isError ? 'msg-error' : 'msg-success');
+        el.style.display = 'block';
+    }
+    function hideMsg() {
+        document.getElementById('authMsg').style.display = 'none';
+    }
+
+    async function login() {
+        const universityId = document.getElementById('loginUniId').value.trim();
+        const password = document.getElementById('loginPassword').value;
+
+        if (!universityId || !password) {
+            showMsg('Please enter your university ID and password.', true);
+            return;
+        }
+
+        const res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ universityId, password })
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+            voterToken = data.token;
+            localStorage.setItem('voterToken', voterToken);
+            showDashboard();
+        } else {
+            showMsg(data.error || 'Login failed.', true);
+        }
+    }
+
+    async function register() {
+        const universityId = document.getElementById('regUniId').value.trim();
+        const fullName = document.getElementById('regFullName').value.trim();
+        const email = document.getElementById('regEmail').value.trim();
+        const password = document.getElementById('regPassword').value;
+
+        if (!universityId || !fullName || !email || !password) {
+            showMsg('Please fill in all fields.', true);
+            return;
+        }
+
+        const res = await fetch('/api/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ universityId, fullName, email, password })
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+            pendingUniId = universityId;
+            document.getElementById('otpEmailDisplay').textContent = email;
+            document.getElementById('registerPane').style.display = 'none';
+            document.getElementById('otpPane').style.display = 'block';
+            showMsg(data.message, false);
+        } else {
+            showMsg(data.error || 'Registration failed.', true);
+        }
+    }
+
+    async function verifyOtp() {
+        const otp = document.getElementById('otpCode').value.trim();
+        if (!pendingUniId || !otp) {
+            showMsg('Please enter the OTP code.', true);
+            return;
+        }
+
+        const res = await fetch('/api/auth/verify-otp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ universityId: pendingUniId, otp })
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+            showMsg(data.message + ' You can log in now.', false);
+            document.getElementById('otpPane').style.display = 'none';
+            switchTab('login');
+            document.getElementById('loginUniId').value = pendingUniId;
+        } else {
+            showMsg(data.error || 'Verification failed.', true);
+        }
+    }
+
+    async function resendOtp() {
+        if (!pendingUniId) return;
+        const res = await fetch('/api/auth/resend-otp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ universityId: pendingUniId })
+        });
+        const data = await res.json();
+        showMsg(res.ok ? data.message : (data.error || 'Could not resend OTP.'), !res.ok);
+    }
+
+    function logout() {
+        localStorage.removeItem('voterToken');
+        location.reload();
+    }
+
+    function showDashboard() {
+        document.getElementById('authSection').style.display = 'none';
+        document.getElementById('dashboardSection').style.display = 'block';
+        loadElectionsList();
+    }
+
+    async function loadElectionsList() {
+        const res = await fetch('/api/elections/overview');
+        const data = await res.json();
+        const container = document.getElementById('electionsList');
+        container.innerHTML = '';
+
+        if (!data.elections || data.elections.length === 0) {
+            container.innerHTML = '<p>No elections found.</p>';
+            return;
+        }
+
+        data.elections.forEach(elec => {
+            const isLive = elec.status === 'active';
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <strong>${elec.title}</strong>
+                        <span class="badge ${isLive ? 'badge-active' : 'badge-closed'}">${elec.status.toUpperCase()}</span>
+                    </div>
+                    <button onclick="viewElection(${elec.election_id}, '${elec.status}')" class="btn btn-primary">
+                        ${isLive ? 'Open Election' : 'View Final Results'}
+                    </button>
+                </div>
+            `;
+            container.appendChild(card);
+        });
+    }
+
+    async function viewElection(electionId, status) {
+        const detailView = document.getElementById('electionDetailView');
+        detailView.style.display = 'block';
+
+        if (status === 'closed') {
+            renderResultsView(electionId, true);
+            return;
+        }
+
+        const statusRes = await fetch('/api/voter/status', {
+            headers: { 'Authorization': `Bearer ${voterToken}` }
+        });
+        if (statusRes.status === 401 || statusRes.status === 403) { logout(); return; }
+        const statusData = await statusRes.json();
+
+        if (statusData.hasVoted) {
+            renderResultsView(electionId, false, "You have already cast your vote for this election. Here are the live results:");
+        } else {
+            renderBallotView(electionId);
+        }
+    }
+
+    async function renderBallotView(electionId) {
+        const res = await fetch('/api/election/active');
+        const data = await res.json();
+        const detailView = document.getElementById('electionDetailView');
+
+        let html = `<h3>Cast Your Vote: ${data.title}</h3><form id="ballotForm">`;
+
+        data.categories.forEach(cat => {
+            html += `<div style="margin-bottom: 15px;"><h4>${cat.category_name}</h4>`;
+            cat.candidates.forEach(cand => {
+                html += `
+                    <div class="candidate-option">
+                        <label>
+                            <input type="radio" name="cat_${cat.category_id}" value="${cand.candidate_id}" required>
+                            <strong>${cand.candidate_name}</strong> (${cand.party})
+                        </label>
+                    </div>
+                `;
+            });
+            html += `</div>`;
+        });
+
+        html += `<button type="button" onclick="submitVote(${data.electionId})" class="btn btn-success">Submit Ballot</button></form>`;
+        detailView.innerHTML = html;
+    }
+
+    async function submitVote(electionId) {
+        const form = document.getElementById('ballotForm');
+        const formData = new FormData(form);
+        const votes = [];
+
+        for (let [key, value] of formData.entries()) {
+            const categoryId = key.replace('cat_', '');
+            votes.push({ categoryId: parseInt(categoryId), candidateId: parseInt(value) });
+        }
+
+        const res = await fetch('/api/vote', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${voterToken}`
+            },
+            body: JSON.stringify({ electionId, votes })
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+            alert('Vote submitted successfully!');
+            viewElection(electionId, 'active');
+        } else {
+            alert(data.error || 'Failed to submit vote.');
+        }
+    }
+
+    async function renderResultsView(electionId, isClosed, bannerText = "") {
+        const res = await fetch(`/api/election/${electionId}/results`);
+        const data = await res.json();
+        const detailView = document.getElementById('electionDetailView');
+
+        let html = `<h3>${isClosed ? 'Final Election Results' : 'Live Standings'}</h3>`;
+        if (bannerText) html += `<p style="color: #007bff; font-weight: bold;">${bannerText}</p>`;
+
+        data.categories.forEach(cat => {
+            html += `<h4>${cat.category_name}</h4>`;
+            const maxVotes = Math.max(...cat.candidates.map(c => c.vote_count), 0);
+
+            cat.candidates.forEach(cand => {
+                const isWinning = cand.vote_count === maxVotes && maxVotes > 0;
+                html += `
+                    <div class="candidate-option">
+                        <span>
+                            <strong>${cand.candidate_name}</strong> (${cand.party})
+                            ${isWinning ? `<span class="winner-tag">\u{1F3C6} ${isClosed ? 'WINNER' : 'LEADING'}</span>` : ''}
+                        </span>
+                        <span><strong>${cand.vote_count}</strong> votes</span>
+                    </div>
+                `;
+            });
+        });
+
+        detailView.innerHTML = html;
+    }
+</script>
+
+</body>
+</html>

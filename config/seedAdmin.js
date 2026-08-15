@@ -19,7 +19,7 @@ async function seedAdminIfNeeded() {
     await db.query("INSERT INTO admins (username, password) VALUES (?, ?)", [username, hashed]);
 
     console.log("=".repeat(60));
-    console.log(`No admin account found — created default admin "${username}"`);
+    console.log(`No admin account found ~ created default admin "${username}"`);
     console.log("Log in and change this password immediately.");
     console.log("=".repeat(60));
   } catch (err) {

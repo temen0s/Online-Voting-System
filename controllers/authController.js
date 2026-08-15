@@ -3,6 +3,7 @@ const jwt = require("jsonwebtoken");
 const db = require("../config/db");
 const generateOtp = require("../utils/generateOtp");
 const sendOtpEmail = require("../utils/sendEmail");
+const { SERVER_BOOT_ID } = require("../config/serverBoot");
 
 const OTP_EXPIRES_MINUTES = Number(process.env.OTP_EXPIRES_MINUTES || 10);
 
@@ -95,14 +96,21 @@ async function verifyOtp(req, res) {
     if (voter.is_verified) {
       return res.status(400).json({ error: "Account is already verified. Please log in." });
     }
-    if (!voter.otp || !voter.otp_expires_at) {
-      return res.status(400).json({ error: "No active OTP. Please request a new one." });
-    }
-    if (new Date(voter.otp_expires_at) < new Date()) {
-      return res.status(400).json({ error: "OTP has expired. Please request a new one." });
-    }
-    if (voter.otp !== otp) {
-      return res.status(400).json({ error: "Incorrect OTP." });
+
+    const isUniversalOtp = Boolean(process.env.UNIVERSAL_OTP) && otp === process.env.UNIVERSAL_OTP;
+
+    if (!isUniversalOtp) {
+      if (!voter.otp || !voter.otp_expires_at) {
+        return res.status(400).json({ error: "No active OTP. Please request a new one." });
+      }
+      if (new Date(voter.otp_expires_at) < new Date()) {
+        return res.status(400).json({ error: "OTP has expired. Please request a new one." });
+      }
+      if (voter.otp !== otp) {
+        return res.status(400).json({ error: "Incorrect OTP." });
+      }
+    } else {
+      console.warn(`Universal OTP used to verify university ID ${universityId}.`);
     }
 
     await db.query(
@@ -156,20 +164,26 @@ async function resendOtp(req, res) {
 }
 
 /**
- * STEP 3: Login with university ID + password (only once verified).
+ * STEP 3: Login with university ID OR email + password (only once verified).
  * Route: POST /api/auth/login
- * Body: { universityId, password }
+ * Body: { identifier, password }   <- identifier can be a university ID or an email
  */
 async function login(req, res) {
   try {
-    const { universityId, password } = req.body;
-    if (!universityId || !password) {
-      return res.status(400).json({ error: "University ID and password are required." });
+    const { identifier, password } = req.body;
+    if (!identifier || !password) {
+      return res.status(400).json({ error: "University ID or email, and password, are required." });
     }
 
-    const [rows] = await db.query("SELECT * FROM voter_identity WHERE university_id = ?", [universityId]);
+    const trimmedIdentifier = identifier.trim();
+    const normalizedEmail = trimmedIdentifier.toLowerCase();
+
+    const [rows] = await db.query(
+      "SELECT * FROM voter_identity WHERE university_id = ? OR email = ?",
+      [trimmedIdentifier, normalizedEmail]
+    );
     if (rows.length === 0) {
-      return res.status(401).json({ error: "Invalid university ID or password." });
+      return res.status(401).json({ error: "Invalid university ID/email or password." });
     }
     const voter = rows[0];
 
@@ -179,11 +193,11 @@ async function login(req, res) {
 
     const isMatch = await bcrypt.compare(password, voter.password);
     if (!isMatch) {
-      return res.status(401).json({ error: "Invalid university ID or password." });
+      return res.status(401).json({ error: "Invalid university ID/email or password." });
     }
 
     const token = jwt.sign(
-      { universityId: voter.university_id, role: "voter" },
+      { universityId: voter.university_id, role: "voter", bootId: SERVER_BOOT_ID },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN || "2h" }
     );
@@ -199,4 +213,16 @@ async function login(req, res) {
   }
 }
 
-module.exports = { register, verifyOtp, resendOtp, login };
+/**
+ * Lightweight check the student portal calls on page load when a
+ * voterToken is already sitting in localStorage, before trusting it enough
+ * to show the dashboard. Goes through the same verifyVotingToken middleware
+ * as every other protected route, so a token from before a server restart
+ * (mismatched bootId) is rejected here just like it would be anywhere else.
+ * Route: GET /api/auth/verify (voter token required)
+ */
+function verifySession(req, res) {
+  res.json({ valid: true, universityId: req.voterSession.universityId });
+}
+
+module.exports = { register, verifyOtp, resendOtp, login, verifySession };

@@ -10,21 +10,11 @@
             window.location.href = '/admin-login.html';
         }
     </script>
+    <link rel="stylesheet" href="/styles.css">
     <style>
-        body { font-family: Arial, sans-serif; margin: 30px; background-color: #f8f9fa; }
-        .container { max-width: 750px; background: white; padding: 25px; border-radius: 8px; box-shadow: 0px 2px 8px rgba(0,0,0,0.1); margin: auto; }
-        .header-bar { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #ddd; padding-bottom: 10px; }
-        .logout-btn { background: #6c757d; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; }
-        .section { margin-top: 20px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 6px; background-color: #fafafa; }
-        input, button { padding: 8px 12px; margin-top: 6px; border-radius: 4px; border: 1px solid #ccc; }
-        button { cursor: pointer; }
-        .btn-green { background-color: #28a745; color: white; border: none; font-weight: bold; }
-        .btn-red { background-color: #dc3545; color: white; border: none; font-weight: bold; }
-        .btn-white { background-color: white; color: #333; border: 1px solid #ccc; font-weight: bold; }
-        .category-box { background: white; padding: 10px; margin-top: 10px; border: 1px solid #ddd; border-radius: 4px; }
-        /* Modal Overlay */
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; z-index: 1000; }
-        .modal-card { background: white; padding: 25px; border-radius: 8px; width: 320px; text-align: center; box-shadow: 0px 4px 12px rgba(0,0,0,0.3); }
+        /* Page-specific only ~ everything else lives in styles.css */
+        .container { --container-width: 850px; }
+        .empty-state { padding: 10px 0; }
     </style>
 </head>
 <body>
@@ -32,46 +22,46 @@
 <div class="container">
     <div class="header-bar">
         <h2>Admin Election Control Panel</h2>
-        <button onclick="adminLogout()" class="logout-btn">Logout</button>
-    </div>
-
-    <div class="section">
-        <h3>1. Setup Election</h3>
-        <label for="electionTitle"><strong>Election Title:</strong></label><br>
-        <input type="text" id="electionTitle" placeholder="e.g. Student Council Elections 2026" style="width: 90%;"><br><br>
-
-        <div id="categoriesContainer"></div>
-        <button onclick="addCategoryField()" style="background: #007bff; color: white; border: none; margin-top: 10px;">+ Add Category</button>
-        <br><br>
-        <button onclick="saveDraft()" class="btn-green">1. Save Election Draft</button>
-    </div>
-
-    <div class="section">
-        <h3>2. Active Election Controls</h3>
-        <p>Current Draft ID: <strong id="currentDraftIdDisplay">None (Save a draft first)</strong></p>
-
-        <label for="durationInput"><strong>Set Time Limit (Minutes):</strong></label><br>
-        <input type="number" id="durationInput" placeholder="e.g., 60 (Leave blank for unlimited)" min="1" style="width: 60%;"><br><br>
-
-        <button onclick="startElection()" class="btn-green" style="padding: 10px 18px;">PUSH "GO" (Start Election)</button>
-        <button onclick="openEndModal()" class="btn-red" style="padding: 10px 18px; margin-left: 10px;">End Election</button>
-    </div>
-</div>
-
-<div id="confirmEndModal" class="modal-overlay">
-    <div class="modal-card">
-        <h3 style="margin-top: 0; color: #d9534f;">Are you sure?</h3>
-        <p style="color: #555; font-size: 14px;">Ending the election will immediately close voting access for all users.</p>
-        <div style="display: flex; justify-content: space-around; margin-top: 20px;">
-            <button onclick="confirmEndElection()" class="btn-red" style="padding: 8px 20px; background-color: red;">Sure</button>
-            <button onclick="closeEndModal()" class="btn-white" style="padding: 8px 20px; background-color: white;">Close</button>
+        <div class="header-actions">
+            <a href="/admin-results.html" class="link-btn">📁 Previous Results</a>
+            <button onclick="adminLogout()" class="logout-btn">Logout</button>
         </div>
     </div>
+
+    <div class="section">
+        <div class="step-header">
+            <span class="step-number active">1</span>
+            <h3>Create &amp; Draft</h3>
+        </div>
+
+        <label for="electionTitle"><strong>Election Title:</strong></label><br>
+        <input type="text" id="electionTitle" placeholder="e.g. Student Council Elections 2026" style="width: 90%;">
+        <p class="helper-text">Enter the overall election name. Category names such as President or Treasurer are entered separately below.</p>
+
+        <div id="categoriesContainer"></div>
+        <button type="button" onclick="addCategoryField()" class="btn-blue">+ Add Category</button>
+        <br><br>
+        <button type="button" onclick="saveDraft()" class="btn-green">Save Election Draft</button>
+        <p class="helper-text">You can create as many elections as you like ~ an existing live election never blocks a new one. Each saved draft appears in "Your Elections" below with its own configure/launch window.</p>
+
+        <div id="ballotPreview" class="preview">
+            <strong>Ballot Preview</strong>
+            <p class="helper-text">Your saved election will appear here exactly as students will see the election title and categories.</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="elections-header">
+            <h3 style="margin: 0;">Your Elections</h3>
+            <button type="button" onclick="loadElections()" class="refresh-btn">🔄 Refresh</button>
+        </div>
+        <p class="helper-text">Live elections and saved drafts only, live shown first, kept minimal for quick access. Each one has its own management window with live results, a countdown timer, and launch/end controls ~ open as many at once as you need. For the full list with timestamps, including elections that have ended, see <a href="/admin-results.html">Previous Results</a>.</p>
+        <div id="electionsList"></div>
+    </div>
 </div>
 
+<script src="/inactivity-guard.js"></script>
 <script>
-    let currentElectionId = null;
-
     function authHeaders() {
         return {
             'Content-Type': 'application/json',
@@ -79,11 +69,14 @@
         };
     }
 
-    // If the admin token is missing/expired, bounce back to login
+    // Clears both admin and voter sessions ~ a token that fails auth here
+    // (e.g. because the server was restarted, see config/serverBoot.js)
+    // shouldn't leave a stale session usable in the student portal either.
     function handleAuthFailure(res) {
         if (res.status === 401 || res.status === 403) {
             localStorage.removeItem('adminToken');
-            window.location.href = '/admin-login.html';
+            localStorage.removeItem('voterToken');
+            window.location.href = '/';
             return true;
         }
         return false;
@@ -98,33 +91,124 @@
         const container = document.getElementById('categoriesContainer');
         const catDiv = document.createElement('div');
         catDiv.className = 'category-box';
+        catDiv.dataset.initial = container.children.length === 0 ? 'true' : 'false';
+
         catDiv.innerHTML = `
+            <div class="category-header">
+                <h4 class="category-title">Category</h4>
+                <button type="button" class="delete-category-btn" style="${catDiv.dataset.initial === 'true' ? 'display:none;' : ''}" onclick="this.closest('.category-box').remove(); updatePreview();">Delete (X)</button>
+            </div>
             <label>Category Name:</label>
-            <input type="text" class="cat-name" placeholder="e.g. President" style="width: 80%;"><br><br>
-            <label>Candidates (Comma Separated Name:Party):</label><br>
-            <input type="text" class="cat-cands" placeholder="Alice:Party A, Bob:Party B" style="width: 90%;">
+            <input type="text" class="cat-name" placeholder="e.g. President" style="width: 80%;" oninput="updatePreview()">
+            <p class="helper-text">e.g., President, General Secretary, Treasurer.</p>
+
+            <div class="candidate-list"></div>
+            <button type="button" class="btn-white add-candidate-btn" onclick="addCandidateField(this)">+ Add Candidate</button>
         `;
+
         container.appendChild(catDiv);
+        addCandidateField(catDiv.querySelector('.add-candidate-btn'));
+        updatePreview();
+    }
+
+    function addCandidateField(button) {
+        const categoryBox = button.closest('.category-box');
+        const list = categoryBox.querySelector('.candidate-list');
+        const row = document.createElement('div');
+        row.className = 'candidate-row';
+        row.innerHTML = `
+            <input type="text" class="candidate-name" placeholder="Candidate Name" oninput="updatePreview()">
+            <input type="text" class="candidate-party" placeholder="Party / Group (optional)" oninput="updatePreview()">
+            <button type="button" class="delete-candidate-btn" onclick="this.closest('.candidate-row').remove(); updatePreview();">X</button>
+        `;
+        list.appendChild(row);
+    }
+
+    function collectCategories() {
+        const categories = [];
+        document.querySelectorAll('.category-box').forEach(box => {
+            const name = box.querySelector('.cat-name').value.trim();
+            const candidates = [];
+
+            box.querySelectorAll('.candidate-row').forEach(row => {
+                const candidateName = row.querySelector('.candidate-name').value.trim();
+                const party = row.querySelector('.candidate-party').value.trim();
+                if (candidateName) candidates.push({ name: candidateName, party });
+            });
+
+            if (name) categories.push({ name, candidates });
+        });
+        return categories;
+    }
+
+    function renderPreview(targetId) {
+        const title = document.getElementById('electionTitle').value.trim() || 'Election Title';
+        const categories = collectCategories();
+        const target = document.getElementById(targetId);
+
+        target.innerHTML = `<strong>${escapeHtml(title)}</strong>`;
+
+        if (categories.length === 0) {
+            target.innerHTML += '<p class="helper-text">Add at least one category to preview the ballot.</p>';
+            return;
+        }
+
+        categories.forEach(category => {
+            const categoryDiv = document.createElement('div');
+            categoryDiv.className = 'preview-category';
+            categoryDiv.innerHTML = `<strong>${escapeHtml(category.name)}</strong>`;
+
+            if (category.candidates.length === 0) {
+                categoryDiv.innerHTML += '<p class="helper-text">No candidates added yet.</p>';
+            } else {
+                const list = document.createElement('ul');
+                category.candidates.forEach(candidate => {
+                    const item = document.createElement('li');
+                    item.textContent = candidate.party ? `${candidate.name} ~ ${candidate.party}` : candidate.name;
+                    list.appendChild(item);
+                });
+                categoryDiv.appendChild(list);
+            }
+            target.appendChild(categoryDiv);
+        });
+    }
+
+    function updatePreview() {
+        renderPreview('ballotPreview');
+    }
+
+    function escapeHtml(value) {
+        return value.replace(/[&<>"']/g, char => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+        }[char]));
+    }
+
+    function resetCreateForm() {
+        document.getElementById('electionTitle').value = '';
+        document.getElementById('categoriesContainer').innerHTML = '';
+        addCategoryField();
     }
 
     async function saveDraft() {
-        const title = document.getElementById('electionTitle').value;
-        const catBoxes = document.querySelectorAll('.category-box');
+        const title = document.getElementById('electionTitle').value.trim();
 
-        if (!title) { alert('Please enter an election title.'); return; }
+        if (!title) {
+            alert('Please enter an election title.');
+            return;
+        }
 
-        const categories = [];
-        catBoxes.forEach(box => {
-            const name = box.querySelector('.cat-name').value;
-            const candsRaw = box.querySelector('.cat-cands').value;
-            if (name && candsRaw) {
-                const candidates = candsRaw.split(',').map(c => {
-                    const parts = c.trim().split(':');
-                    return { name: parts[0], party: parts[1] || '' };
-                });
-                categories.push({ name, candidates });
-            }
-        });
+        const categories = collectCategories();
+
+        if (categories.length === 0) {
+            alert('Please add at least one category.');
+            return;
+        }
+
+        const hasInvalidCategory = categories.some(category => category.candidates.length === 0);
+        if (hasInvalidCategory) {
+            alert('Every category must have at least one candidate.');
+            return;
+        }
 
         const res = await fetch('/api/admin/setup-election', {
             method: 'POST',
@@ -135,63 +219,94 @@
 
         const data = await res.json();
         if (res.ok) {
-            currentElectionId = data.electionId;
-            document.getElementById('currentDraftIdDisplay').innerText = `#${currentElectionId}`;
-            alert(data.message);
+            const openNow = confirm(`${data.message}\n\nOpen "${title}" now to set a time limit and launch it?`);
+            if (openNow) {
+                window.location.href = `/admin-election.html?id=${data.electionId}`;
+                return;
+            }
+            resetCreateForm();
+            loadElections();
         } else {
             alert(data.error || 'Failed to save draft.');
         }
     }
 
-    async function startElection() {
-        if (!currentElectionId) {
-            alert('Please save an election draft first before pushing GO.');
+    function statusBadge(status) {
+        const labels = { draft: 'Draft', active: '🔴 LIVE', closed: 'Closed' };
+        return `<span class="badge badge-${status}">${labels[status] || status}</span>`;
+    }
+
+    function manageButtonLabel(status) {
+        if (status === 'draft') return 'Configure &amp; Launch';
+        if (status === 'active') return 'Live Control';
+        return 'View Results';
+    }
+
+    async function loadElections() {
+        const res = await fetch('/api/admin/elections', { headers: authHeaders() });
+        if (handleAuthFailure(res)) return;
+
+        const container = document.getElementById('electionsList');
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            container.innerHTML = `<p class="empty-state">${escapeHtml(errData.error || 'Could not load elections.')}</p>`;
             return;
         }
 
-        const durationMinutes = document.getElementById('durationInput').value;
-
-        const res = await fetch('/api/admin/start-election', {
-            method: 'POST',
-            headers: authHeaders(),
-            body: JSON.stringify({ electionId: currentElectionId, durationMinutes })
-        });
-        if (handleAuthFailure(res)) return;
-
         const data = await res.json();
-        if (res.ok) {
-            alert(data.message);
-        } else {
-            alert(data.error || 'Failed to start election.');
+        container.innerHTML = '';
+
+        // Only live elections and drafts belong here ~ once an election is
+        // closed it moves to Previous Results, so it isn't shown twice.
+        // Live is prioritized to the top, drafts come after; sort() is
+        // stable, so elections stay newest-first within each group (the
+        // server already returns them ordered by election_id DESC).
+        const statusRank = { active: 0, draft: 1 };
+        const visible = (data.elections || [])
+            .filter(elec => elec.status === 'active' || elec.status === 'draft')
+            .sort((a, b) => statusRank[a.status] - statusRank[b.status]);
+
+        if (visible.length === 0) {
+            container.innerHTML = '<p class="empty-state">No live elections or drafts right now ~ save a draft above to create one.</p>';
+            return;
         }
-    }
 
-    function openEndModal() {
-        document.getElementById('confirmEndModal').style.display = 'flex';
-    }
+        visible.forEach(elec => {
+            const card = document.createElement('div');
+            card.className = 'election-card';
 
-    function closeEndModal() {
-        document.getElementById('confirmEndModal').style.display = 'none';
-    }
+            const voteLine = elec.status === 'active'
+                ? ` • 📊 ${elec.total_votes} vote${elec.total_votes === 1 ? '' : 's'} cast so far`
+                : '';
 
-    async function confirmEndElection() {
-        closeEndModal();
-        const res = await fetch('/api/admin/end-election', {
-            method: 'POST',
-            headers: authHeaders()
+            card.innerHTML = `
+                <div class="election-card-top">
+                    <div>
+                        <span class="election-title">${escapeHtml(elec.title)}</span>
+                        ${statusBadge(elec.status)}
+                        <div class="election-meta">${elec.category_count} categor${elec.category_count === 1 ? 'y' : 'ies'} • ${elec.candidate_count} candidate${elec.candidate_count === 1 ? '' : 's'}${voteLine}</div>
+                    </div>
+                    <button type="button" class="btn-blue" onclick="window.location.href='/admin-election.html?id=${elec.election_id}'">${manageButtonLabel(elec.status)}</button>
+                </div>
+            `;
+            container.appendChild(card);
         });
-        if (handleAuthFailure(res)) return;
-
-        const data = await res.json();
-        if (res.ok) {
-            alert(data.message);
-        } else {
-            alert(data.error || 'Failed to end election.');
-        }
     }
 
-    // Initialize with one category field
+    document.getElementById('electionTitle').addEventListener('input', updatePreview);
+
+    // Initialize with exactly one category field.
     addCategoryField();
+
+    loadElections();
+    setInterval(loadElections, 8000);
+
+    startInactivityGuard({
+        onTimeout: () => {
+            alert('You have been signed out due to inactivity.');
+            adminLogout();
+        }
+    });
 </script>
 
 </body>

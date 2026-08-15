@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Previous Results - Online Voting System</title>
+    <script>
+        if (!localStorage.getItem('adminToken')) {
+            window.location.href = '/admin-login.html';
+        }
+    </script>
+    <link rel="stylesheet" href="/styles.css">
+    <style>
+        /* Page-specific only ~ everything else lives in styles.css */
+        .container { --container-width: 750px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header-bar">
+        <h2>Previous Results</h2>
+        <a href="/admin.html" class="back-link">← Back to Dashboard</a>
+    </div>
+    <p class="helper-text">Every election you've created, live first, then saved drafts, then closed elections (most recently ended first).</p>
+
+    <div id="loadingState" class="loading">Loading…</div>
+    <div id="resultsList"></div>
+</div>
+
+<script src="/inactivity-guard.js"></script>
+<script>
+    function authHeaders() {
+        return { 'Authorization': `Bearer ${localStorage.getItem('adminToken')}` };
+    }
+
+    // Clears both admin and voter sessions ~ a token that fails auth here
+    // (e.g. because the server was restarted, see config/serverBoot.js)
+    // shouldn't leave a stale session usable in the student portal either.
+    function handleAuthFailure(res) {
+        if (res.status === 401 || res.status === 403) {
+            localStorage.removeItem('adminToken');
+            localStorage.removeItem('voterToken');
+            window.location.href = '/';
+            return true;
+        }
+        return false;
+    }
+
+    function escapeHtml(value) {
+        return String(value).replace(/[&<>"']/g, char => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+        }[char]));
+    }
+
+    function formatDate(value) {
+        if (!value) return '';
+        const d = new Date(value);
+        return d.toLocaleString();
+    }
+
+    function statusBadge(status) {
+        const labels = { draft: 'Draft', active: '🔴 LIVE', closed: 'Closed' };
+        return `<span class="badge badge-${status}">${labels[status] || status}</span>`;
+    }
+
+    function manageButtonLabel(status) {
+        if (status === 'draft') return 'Configure &amp; Launch';
+        if (status === 'active') return 'Live Control';
+        return 'View Results';
+    }
+
+    // Different statuses carry different timestamps: a draft only has a
+    // "saved" moment, a live election has a "started" moment, and a closed
+    // one has both a start and an end. Shows only what's meaningful for
+    // that status, and only if the timestamp is actually present.
+    function timingLine(elec) {
+        if (elec.status === 'draft') {
+            return elec.created_at ? `Draft saved ${formatDate(elec.created_at)}` : '';
+        }
+        if (elec.status === 'active') {
+            return elec.started_at ? `Voting started ${formatDate(elec.started_at)}` : '';
+        }
+        // closed
+        if (elec.started_at && elec.ended_at) {
+            return `Voting started ${formatDate(elec.started_at)} • ended ${formatDate(elec.ended_at)}`;
+        }
+        if (elec.ended_at) return `Voting ended ${formatDate(elec.ended_at)}`;
+        if (elec.started_at) return `Voting started ${formatDate(elec.started_at)}`;
+        return '';
+    }
+
+    async function loadResults() {
+        const res = await fetch('/api/admin/elections', { headers: authHeaders() });
+        if (handleAuthFailure(res)) return;
+
+        document.getElementById('loadingState').style.display = 'none';
+        const container = document.getElementById('resultsList');
+
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            container.innerHTML = `<p class="empty-state">${escapeHtml(errData.error || 'Could not load results.')}</p>`;
+            return;
+        }
+
+        const data = await res.json();
+
+        // Every election shows up here. Live is prioritized to the top,
+        // drafts come next, and closed elections are last, sorted among
+        // themselves by when voting ended (most recent first). sort() is
+        // stable, so live/draft keep the server's election_id DESC order
+        // within their own group.
+        const statusRank = { active: 0, draft: 1, closed: 2 };
+        const elections = (data.elections || []).slice().sort((a, b) => {
+            const rankDiff = statusRank[a.status] - statusRank[b.status];
+            if (rankDiff !== 0) return rankDiff;
+            if (a.status === 'closed') {
+                const aTime = new Date(a.ended_at || a.ends_at || a.created_at).getTime();
+                const bTime = new Date(b.ended_at || b.ends_at || b.created_at).getTime();
+                return bTime - aTime;
+            }
+            return 0;
+        });
+
+        if (elections.length === 0) {
+            container.innerHTML = '<p class="empty-state">No elections yet ~ save a draft on the dashboard to create your first one.</p>';
+            return;
+        }
+
+        container.innerHTML = '';
+        elections.forEach(elec => {
+            const card = document.createElement('div');
+            card.className = 'election-card';
+
+            let voteLine = '';
+            if (elec.status === 'active') voteLine = ` • 📊 ${elec.total_votes} vote${elec.total_votes === 1 ? '' : 's'} cast so far`;
+            if (elec.status === 'closed') voteLine = ` • 📊 ${elec.total_votes} total vote${elec.total_votes === 1 ? '' : 's'}`;
+
+            const timing = timingLine(elec);
+
+            card.innerHTML = `
+                <div class="election-card-top">
+                    <div>
+                        <span class="election-title">${escapeHtml(elec.title)}</span>
+                        ${statusBadge(elec.status)}
+                        <div class="election-meta">
+                            ${elec.category_count} categor${elec.category_count === 1 ? 'y' : 'ies'} •
+                            ${elec.candidate_count} candidate${elec.candidate_count === 1 ? '' : 's'}${voteLine}
+                        </div>
+                        ${timing ? `<div class="election-meta">${timing}</div>` : ''}
+                    </div>
+                    <button type="button" class="btn-blue" onclick="window.location.href='/admin-election.html?id=${elec.election_id}'">${manageButtonLabel(elec.status)}</button>
+                </div>
+            `;
+            container.appendChild(card);
+        });
+    }
+
+    loadResults();
+
+    startInactivityGuard({
+        onTimeout: () => {
+            alert('You have been signed out due to inactivity.');
+            localStorage.removeItem('adminToken');
+            window.location.href = '/admin-login.html';
+        }
+    });
+</script>
+
+</body>
+</html>

@@ -1,6 +1,7 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const db = require("../config/db");
+const { SERVER_BOOT_ID } = require("../config/serverBoot");
 
 /**
  * Admin login.
@@ -26,7 +27,7 @@ async function login(req, res) {
     }
 
     const adminToken = jwt.sign(
-      { adminId: admin.id, role: "admin" },
+      { adminId: admin.id, role: "admin", bootId: SERVER_BOOT_ID },
       process.env.JWT_SECRET,
       { expiresIn: "2h" }
     );

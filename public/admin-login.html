@@ -4,64 +4,76 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Login - Voting System</title>
+    <link rel="stylesheet" href="/styles.css">
     <style>
+        /* Page-specific only ~ everything else lives in styles.css.
+           This page is a single centred card rather than the standard
+           .container layout, so it owns its own body rules. */
         body {
-            font-family: Arial, sans-serif;
-            background-color: #f4f6f9;
             display: flex;
             justify-content: center;
             align-items: center;
             height: 100vh;
             margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
         }
         .login-card {
-            background: #ffffff;
+            background: var(--color-surface);
             padding: 30px;
-            border-radius: 8px;
+            border-radius: var(--radius-lg);
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
             width: 100%;
             max-width: 380px;
         }
         .login-card h2 {
             margin-top: 0;
-            color: #333;
+            color: var(--color-text);
             text-align: center;
         }
-        .form-group {
+        .login-card .form-group {
             margin-bottom: 15px;
         }
-        .form-group label {
-            display: block;
+        .login-card .form-group label {
             margin-bottom: 5px;
-            color: #555;
-            font-weight: bold;
+            font-size: inherit;
         }
-        .form-group input {
-            width: 100%;
+        .login-card .form-group input {
             padding: 10px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            box-sizing: border-box;
         }
         .btn-login {
             width: 100%;
             padding: 10px;
-            background-color: #007bff;
-            color: white;
+            background-color: var(--color-primary);
+            color: #fff;
             border: none;
-            border-radius: 4px;
+            border-radius: var(--radius-sm);
             font-size: 16px;
             font-weight: bold;
             cursor: pointer;
         }
         .btn-login:hover {
-            background-color: #0056b3;
+            background-color: var(--color-primary-dark);
         }
         .error-msg {
-            color: #dc3545;
+            color: var(--color-danger);
             margin-top: 15px;
             text-align: center;
             display: none;
+        }
+        /* This page's back link sits centred under the card, unlike the
+           inline header back-links on the other admin pages. */
+        .back-link {
+            display: block;
+            text-align: center;
+            margin-top: 18px;
+            color: var(--color-neutral);
+            font-size: var(--font-size-small);
+            font-weight: normal;
+        }
+        .back-link:hover {
+            color: var(--color-pill-text);
+            text-decoration: underline;
         }
     </style>
 </head>
@@ -81,6 +93,7 @@
             <button type="submit" class="btn-login">Login to Dashboard</button>
         </form>
         <div id="errorMsg" class="error-msg"></div>
+        <a href="/" class="back-link">← Back to Student Login</a>
     </div>
 
     <script>

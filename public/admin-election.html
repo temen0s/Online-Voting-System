@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Election Control - Online Voting System</title>
+    <script>
+        if (!localStorage.getItem('adminToken')) {
+            window.location.href = '/admin-login.html';
+        }
+    </script>
+    <link rel="stylesheet" href="/styles.css">
+    <style>
+        /* Page-specific only ~ everything else lives in styles.css */
+        .container { --container-width: 700px; }
+        .badge { margin-left: 8px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header-bar">
+        <h2 id="pageTitle">Election Control</h2>
+        <a href="/admin.html" class="back-link">← Back to Dashboard</a>
+    </div>
+
+    <div id="loadingState" class="loading">Loading election…</div>
+    <div id="notFoundState" class="section" style="display:none;">
+        <p>This election could not be found. It may have been removed.</p>
+    </div>
+
+    <div id="content" style="display:none;">
+        <h3 id="electionTitle" style="margin-bottom: 0;"></h3>
+        <span id="statusBadgeTop"></span>
+
+        <div class="section">
+            <div id="statusPanel" class="status-panel">
+                <strong>Status:</strong> <span id="statusText"></span>
+                <div id="timingInfo" class="helper-text" style="margin: 6px 0 0;"></div>
+            </div>
+
+            <div id="liveBanner" class="live-banner" style="display:none;">
+                <strong>Election is LIVE</strong>
+                <div class="live-grid">
+                    <div class="live-stat">⏱ Time Remaining: <span id="countdown">Unlimited</span></div>
+                    <div class="live-stat">📊 Votes Cast: <span id="votesCast">0</span></div>
+                </div>
+            </div>
+
+            <div id="draftControls" style="display:none;">
+                <label for="durationInput"><strong>Set Time Limit (Minutes):</strong></label><br>
+                <input type="number" id="durationInput" placeholder="e.g., 60" min="1" style="width: 60%;">
+                <p class="helper-text">Leave blank for an ongoing election without auto-close.</p>
+            </div>
+
+            <button id="startElectionButton" type="button" onclick="openStartModal()" class="btn-green" style="padding: 10px 18px; display:none;">Start Election</button>
+            <button id="endElectionButton" type="button" onclick="openEndModal()" class="btn-red" style="padding: 10px 18px; margin-left: 10px; display:none;">End Election</button>
+
+            <div id="deleteDraftZone" class="danger-zone" style="display:none;">
+                <p class="helper-text" style="margin-bottom: 8px;">This draft hasn't launched yet, so you can remove it if it's no longer needed. Once an election goes live, it ~ and any published results ~ can no longer be deleted from here.</p>
+                <button id="deleteDraftButton" type="button" onclick="openDeleteModal()" class="btn-danger-outline" style="padding: 8px 14px;">🗑 Delete Draft</button>
+            </div>
+        </div>
+
+        <div id="resultsSection" class="section">
+            <h3 id="resultsHeading" style="margin-top: 0;">Ballot</h3>
+            <div id="resultsBody"></div>
+        </div>
+
+        <div id="editSection" class="section" style="display:none;">
+            <h3 style="margin-top: 0;">Edit Draft</h3>
+            <p class="helper-text">You can freely change the title, categories, and candidates while this election is still a draft. Once it goes live, editing locks.</p>
+
+            <label for="editTitleInput"><strong>Election Title:</strong></label><br>
+            <input type="text" id="editTitleInput" style="width: 90%;">
+
+            <div id="editCategoriesContainer"></div>
+            <button type="button" onclick="addCategoryField()" class="btn-blue">+ Add Category</button>
+            <br><br>
+            <button type="button" onclick="saveDraftEdits()" class="btn-green">Save Changes</button>
+            <span id="unsavedIndicator" class="unsaved-indicator" style="display:none;">⚠ Unsaved changes ~ save before starting the election.</span>
+        </div>
+    </div>
+</div>
+
+<div id="confirmStartModal" class="modal-overlay">
+    <div class="modal-card">
+        <h3 style="margin-top: 0;">Start Election?</h3>
+        <p id="startConfirmationText" style="color: #555; font-size: 14px;"></p>
+        <div style="display: flex; justify-content: space-around; margin-top: 20px;">
+            <button onclick="confirmStartElection()" class="btn-green" style="padding: 8px 20px;">Confirm Start</button>
+            <button onclick="closeStartModal()" class="btn-white" style="padding: 8px 20px;">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<div id="confirmEndModal" class="modal-overlay">
+    <div class="modal-card">
+        <h3 style="margin-top: 0; color: #d9534f;">Close Election?</h3>
+        <p style="color: #555; font-size: 14px;">Are you sure you want to close this election? No further votes will be accepted, and results will be published.</p>
+        <div style="display: flex; justify-content: space-around; margin-top: 20px;">
+            <button onclick="confirmEndElection()" class="btn-red" style="padding: 8px 20px;">Confirm End</button>
+            <button onclick="closeEndModal()" class="btn-white" style="padding: 8px 20px;">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<div id="confirmDeleteModal" class="modal-overlay">
+    <div class="modal-card">
+        <h3 style="margin-top: 0; color: #d9534f;">Delete this draft?</h3>
+        <p id="deleteConfirmationText" style="color: #555; font-size: 14px;"></p>
+        <div style="display: flex; justify-content: space-around; margin-top: 20px;">
+            <button onclick="confirmDeleteDraft()" class="btn-red" style="padding: 8px 20px;">Delete Draft</button>
+            <button onclick="closeDeleteModal()" class="btn-white" style="padding: 8px 20px;">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<script src="/inactivity-guard.js"></script>
+<script>
+    const electionId = new URLSearchParams(window.location.search).get('id');
+    let liveEndsAt = null;
+    let pollInterval = null;
+    let currentStatus = null;
+    let currentTitle = '';
+    let currentCategoryCount = 0;
+    let currentElectionData = null;
+    let formDirty = false;
+    let isPopulatingEditForm = false;
+
+    function authHeaders() {
+        return {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+        };
+    }
+
+    // Clears both admin and voter sessions ~ a token that fails auth here
+    // (e.g. because the server was restarted, see config/serverBoot.js)
+    // shouldn't leave a stale session usable in the student portal either.
+    function handleAuthFailure(res) {
+        if (res.status === 401 || res.status === 403) {
+            localStorage.removeItem('adminToken');
+            localStorage.removeItem('voterToken');
+            window.location.href = '/';
+            return true;
+        }
+        return false;
+    }
+
+    function escapeHtml(value) {
+        return String(value).replace(/[&<>"']/g, char => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+        }[char]));
+    }
+
+    function statusBadge(status) {
+        const labels = { draft: 'Draft', active: '🔴 LIVE', closed: 'Closed' };
+        return `<span class="badge badge-${status}">${labels[status] || status}</span>`;
+    }
+
+    function formatDate(value) {
+        if (!value) return '';
+        const d = new Date(value);
+        return d.toLocaleString();
+    }
+
+    // Same per-status timing rule used on admin-results.html: a draft only
+    // shows when it was saved, a live election only shows when it started,
+    // and a closed one shows both ~ only when the timestamp is present.
+    function timingLine(data) {
+        if (data.status === 'draft') {
+            return data.createdAt ? `Draft saved ${formatDate(data.createdAt)}` : '';
+        }
+        if (data.status === 'active') {
+            return data.startedAt ? `Voting started ${formatDate(data.startedAt)}` : '';
+        }
+        // closed
+        if (data.startedAt && data.endedAt) {
+            return `Voting started ${formatDate(data.startedAt)} • ended ${formatDate(data.endedAt)}`;
+        }
+        if (data.endedAt) return `Voting ended ${formatDate(data.endedAt)}`;
+        if (data.startedAt) return `Voting started ${formatDate(data.startedAt)}`;
+        return '';
+    }
+
+    async function loadElection({ silent } = {}) {
+        if (!electionId) {
+            document.getElementById('loadingState').style.display = 'none';
+            document.getElementById('notFoundState').style.display = 'block';
+            document.getElementById('notFoundState').querySelector('p').textContent = 'No election ID was given in the URL.';
+            return;
+        }
+
+        const res = await fetch(`/api/admin/election/${electionId}`, { headers: authHeaders() });
+        if (handleAuthFailure(res)) return;
+
+        if (!res.ok) {
+            document.getElementById('loadingState').style.display = 'none';
+            document.getElementById('content').style.display = 'none';
+            document.getElementById('notFoundState').style.display = 'block';
+            if (pollInterval) clearInterval(pollInterval);
+            return;
+        }
+
+        const data = await res.json();
+        renderElection(data, { silent });
+    }
+
+    function renderElection(data, { silent } = {}) {
+        currentStatus = data.status;
+        currentTitle = data.title;
+        currentCategoryCount = data.categories.length;
+        currentElectionData = data;
+        liveEndsAt = data.endsAt ? new Date(data.endsAt) : null;
+
+        if (!silent) {
+            document.getElementById('loadingState').style.display = 'none';
+            document.getElementById('content').style.display = 'block';
+        }
+
+        document.title = `${data.title} - Election Control`;
+        document.getElementById('pageTitle').textContent = data.title;
+        document.getElementById('electionTitle').textContent = data.title;
+        document.getElementById('statusBadgeTop').innerHTML = statusBadge(data.status);
+        document.getElementById('votesCast').textContent = data.totalVotes;
+        document.getElementById('timingInfo').textContent = timingLine(data);
+
+        const startBtn = document.getElementById('startElectionButton');
+        const endBtn = document.getElementById('endElectionButton');
+        const draftControls = document.getElementById('draftControls');
+        const liveBanner = document.getElementById('liveBanner');
+        const statusText = document.getElementById('statusText');
+        const deleteDraftZone = document.getElementById('deleteDraftZone');
+        const resultsSection = document.getElementById('resultsSection');
+        const editSection = document.getElementById('editSection');
+
+        if (data.status === 'draft') {
+            statusText.textContent = 'Draft saved ~ ready to launch.';
+            draftControls.style.display = 'block';
+            liveBanner.style.display = 'none';
+            startBtn.style.display = 'inline-block';
+            endBtn.style.display = 'none';
+            deleteDraftZone.style.display = 'block';
+            resultsSection.style.display = 'none';
+            editSection.style.display = 'block';
+            if (!silent) populateEditForm(data);
+            updateStartButtonState();
+            if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+        } else if (data.status === 'active') {
+            statusText.textContent = 'Live ~ students can vote now.';
+            draftControls.style.display = 'none';
+            liveBanner.style.display = 'block';
+            startBtn.style.display = 'inline-block';
+            startBtn.disabled = true;
+            startBtn.title = '';
+            endBtn.style.display = 'inline-block';
+            endBtn.disabled = false;
+            deleteDraftZone.style.display = 'none';
+            resultsSection.style.display = 'block';
+            editSection.style.display = 'none';
+            updateCountdown();
+            if (!pollInterval) pollInterval = setInterval(() => loadElection({ silent: true }), 5000);
+        } else {
+            statusText.textContent = 'Election closed. Results are final.';
+            draftControls.style.display = 'none';
+            liveBanner.style.display = 'none';
+            startBtn.style.display = 'none';
+            endBtn.style.display = 'none';
+            deleteDraftZone.style.display = 'none';
+            resultsSection.style.display = 'block';
+            editSection.style.display = 'none';
+            if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+        }
+
+        document.getElementById('resultsHeading').textContent =
+            data.status === 'closed' ? 'Final Election Results' : (data.status === 'active' ? 'Live Standings' : 'Ballot Preview');
+        renderResults(data);
+    }
+
+    // Returns whether this election currently meets the "every category
+    // needs at least 2 candidates" rule required to go live, plus a
+    // human-readable explanation naming any category that's short.
+    function getUnfilledCategories(data) {
+        if (!data.categories || data.categories.length === 0) {
+            return { canLaunch: false, message: 'Add at least one category before starting this election.' };
+        }
+        const short = data.categories.filter(c => (c.candidates || []).length < 2).map(c => c.category_name);
+        if (short.length > 0) {
+            return {
+                canLaunch: false,
+                message: `Every category needs at least 2 candidates before this election can go live. Add more candidates to: ${short.join(', ')}.`,
+            };
+        }
+        return { canLaunch: true, message: '' };
+    }
+
+    function renderResults(data) {
+        const body = document.getElementById('resultsBody');
+        body.innerHTML = '';
+
+        if (!data.categories || data.categories.length === 0) {
+            body.innerHTML = '<p class="helper-text">No categories on this election.</p>';
+            return;
+        }
+
+        data.categories.forEach(cat => {
+            const div = document.createElement('div');
+            div.className = 'results-category';
+            let html = `<strong>${escapeHtml(cat.category_name)}</strong>`;
+
+            const maxVotes = Math.max(...cat.candidates.map(c => Number(c.vote_count)), 0);
+            const showTags = data.status !== 'draft';
+
+            cat.candidates.forEach(cand => {
+                const isWinning = showTags && Number(cand.vote_count) === maxVotes && maxVotes > 0;
+                html += `
+                    <div class="candidate-option">
+                        <span>
+                            <strong>${escapeHtml(cand.candidate_name)}</strong> (${escapeHtml(cand.party || 'Independent')})
+                            ${isWinning ? `<span class="winner-tag">🏆 ${data.status === 'closed' ? 'WINNER' : 'LEADING'}</span>` : ''}
+                        </span>
+                        ${showTags ? `<span><strong>${cand.vote_count}</strong> votes</span>` : ''}
+                    </div>
+                `;
+            });
+
+            div.innerHTML = html;
+            body.appendChild(div);
+        });
+    }
+
+    function updateCountdown() {
+        if (currentStatus !== 'active') return;
+        const countdown = document.getElementById('countdown');
+
+        if (!liveEndsAt) {
+            countdown.textContent = 'Unlimited';
+            return;
+        }
+
+        const remaining = liveEndsAt.getTime() - Date.now();
+        if (remaining <= 0) {
+            countdown.textContent = '00m 00s';
+            loadElection({ silent: true });
+            return;
+        }
+
+        const totalSeconds = Math.floor(remaining / 1000);
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+
+        countdown.textContent = hours > 0
+            ? `${hours}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`
+            : `${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
+    }
+
+    function openStartModal() {
+        if (currentStatus !== 'draft') return;
+
+        if (formDirty) {
+            alert('You have unsaved changes to this draft. Click "Save Changes" first ~ otherwise the election would start with the old saved data instead of what you just edited.');
+            return;
+        }
+
+        const launchCheck = getUnfilledCategories(currentElectionData);
+        if (!launchCheck.canLaunch) {
+            alert(launchCheck.message);
+            return;
+        }
+
+        document.getElementById('startConfirmationText').textContent =
+            `You are about to start "${currentTitle}" with ${currentCategoryCount} categor${currentCategoryCount === 1 ? 'y' : 'ies'}. Students will be able to vote immediately.`;
+        document.getElementById('confirmStartModal').style.display = 'flex';
+    }
+
+    function closeStartModal() {
+        document.getElementById('confirmStartModal').style.display = 'none';
+    }
+
+    async function confirmStartElection() {
+        closeStartModal();
+        const durationMinutes = document.getElementById('durationInput').value;
+
+        const res = await fetch('/api/admin/start-election', {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ electionId, durationMinutes })
+        });
+        if (handleAuthFailure(res)) return;
+
+        const data = await res.json();
+        if (res.ok) {
+            loadElection();
+        } else {
+            alert(data.error || 'Failed to start election.');
+        }
+    }
+
+    function openEndModal() {
+        if (currentStatus !== 'active') return;
+        document.getElementById('confirmEndModal').style.display = 'flex';
+    }
+
+    function closeEndModal() {
+        document.getElementById('confirmEndModal').style.display = 'none';
+    }
+
+    async function confirmEndElection() {
+        closeEndModal();
+
+        const res = await fetch('/api/admin/end-election', {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ electionId })
+        });
+        if (handleAuthFailure(res)) return;
+
+        const data = await res.json();
+        if (res.ok) {
+            loadElection();
+        } else {
+            alert(data.error || 'Failed to end election.');
+        }
+    }
+
+    function openDeleteModal() {
+        if (currentStatus !== 'draft') return;
+        document.getElementById('deleteConfirmationText').textContent =
+            `Delete "${currentTitle}"? This permanently removes the draft and all its categories and candidates. This can't be undone.`;
+        document.getElementById('confirmDeleteModal').style.display = 'flex';
+    }
+
+    function closeDeleteModal() {
+        document.getElementById('confirmDeleteModal').style.display = 'none';
+    }
+
+    async function confirmDeleteDraft() {
+        closeDeleteModal();
+
+        const res = await fetch(`/api/admin/election/${electionId}`, {
+            method: 'DELETE',
+            headers: authHeaders()
+        });
+        if (handleAuthFailure(res)) return;
+
+        const data = await res.json();
+        if (res.ok) {
+            alert(data.message || 'Draft deleted.');
+            window.location.href = '/admin.html';
+        } else {
+            alert(data.error || 'Failed to delete draft.');
+        }
+    }
+
+    // ---- Draft editing (title / categories / candidates) ----
+
+    // Tracks whether the edit form has changes that haven't been saved yet
+    // via "Save Changes". This exists so that an admin who edits the draft
+    // and then clicks "Start Election" without saving can't accidentally
+    // launch the OLD saved draft data instead of what's on screen.
+    function markFormDirty() {
+        if (isPopulatingEditForm) return;
+        formDirty = true;
+        updateDirtyIndicator();
+        updateStartButtonState();
+    }
+
+    function clearFormDirty() {
+        formDirty = false;
+        updateDirtyIndicator();
+        updateStartButtonState();
+    }
+
+    function updateDirtyIndicator() {
+        const indicator = document.getElementById('unsavedIndicator');
+        if (indicator) indicator.style.display = formDirty ? 'inline' : 'none';
+    }
+
+    // Re-applies the launch-eligibility check AND the dirty-state check to
+    // the Start Election button whenever either one might have changed.
+    function updateStartButtonState() {
+        if (currentStatus !== 'draft' || !currentElectionData) return;
+        const startBtn = document.getElementById('startElectionButton');
+        if (!startBtn) return;
+
+        if (formDirty) {
+            startBtn.disabled = true;
+            startBtn.title = 'Save your changes before starting this election.';
+            return;
+        }
+
+        const launchCheck = getUnfilledCategories(currentElectionData);
+        startBtn.disabled = !launchCheck.canLaunch;
+        startBtn.title = launchCheck.canLaunch ? '' : launchCheck.message;
+    }
+
+    function populateEditForm(data) {
+        isPopulatingEditForm = true;
+
+        document.getElementById('editTitleInput').value = data.title;
+
+        const container = document.getElementById('editCategoriesContainer');
+        container.innerHTML = '';
+
+        if (!data.categories || data.categories.length === 0) {
+            addCategoryField();
+            isPopulatingEditForm = false;
+            clearFormDirty();
+            return;
+        }
+
+        data.categories.forEach(cat => {
+            addCategoryField({
+                name: cat.category_name,
+                candidates: (cat.candidates || []).map(c => ({ name: c.candidate_name, party: c.party }))
+            });
+        });
+
+        isPopulatingEditForm = false;
+        clearFormDirty();
+    }
+
+    function addCategoryField(prefill) {
+        const container = document.getElementById('editCategoriesContainer');
+        const catDiv = document.createElement('div');
+        catDiv.className = 'category-box';
+        catDiv.dataset.initial = container.children.length === 0 ? 'true' : 'false';
+
+        catDiv.innerHTML = `
+            <div class="category-header">
+                <h4 class="category-title">Category</h4>
+                <button type="button" class="delete-category-btn" style="${catDiv.dataset.initial === 'true' ? 'display:none;' : ''}" onclick="this.closest('.category-box').remove(); markFormDirty();">Delete (X)</button>
+            </div>
+            <label>Category Name:</label>
+            <input type="text" class="cat-name" placeholder="e.g. President" style="width: 80%;">
+            <p class="helper-text">e.g., President, General Secretary, Treasurer.</p>
+
+            <div class="candidate-list"></div>
+            <button type="button" class="btn-white add-candidate-btn" onclick="addCandidateField(this)">+ Add Candidate</button>
+        `;
+
+        container.appendChild(catDiv);
+        catDiv.querySelector('.cat-name').value = prefill ? prefill.name : '';
+
+        const candidates = prefill && prefill.candidates && prefill.candidates.length > 0
+            ? prefill.candidates
+            : [null];
+        candidates.forEach(cand => addCandidateField(catDiv.querySelector('.add-candidate-btn'), cand));
+        markFormDirty();
+    }
+
+    function addCandidateField(button, prefill) {
+        const categoryBox = button.closest('.category-box');
+        const list = categoryBox.querySelector('.candidate-list');
+        const row = document.createElement('div');
+        row.className = 'candidate-row';
+        row.innerHTML = `
+            <input type="text" class="candidate-name" placeholder="Candidate Name">
+            <input type="text" class="candidate-party" placeholder="Party / Group (optional)">
+            <button type="button" class="delete-candidate-btn" onclick="this.closest('.candidate-row').remove(); markFormDirty();">X</button>
+        `;
+        list.appendChild(row);
+        if (prefill) {
+            row.querySelector('.candidate-name').value = prefill.name || '';
+            row.querySelector('.candidate-party').value = prefill.party || '';
+        }
+        markFormDirty();
+    }
+
+    function collectCategories() {
+        const categories = [];
+        document.querySelectorAll('#editCategoriesContainer .category-box').forEach(box => {
+            const name = box.querySelector('.cat-name').value.trim();
+            const candidates = [];
+
+            box.querySelectorAll('.candidate-row').forEach(row => {
+                const candidateName = row.querySelector('.candidate-name').value.trim();
+                const party = row.querySelector('.candidate-party').value.trim();
+                if (candidateName) candidates.push({ name: candidateName, party });
+            });
+
+            if (name) categories.push({ name, candidates });
+        });
+        return categories;
+    }
+
+    async function saveDraftEdits() {
+        const title = document.getElementById('editTitleInput').value.trim();
+        if (!title) {
+            alert('Please enter an election title.');
+            return;
+        }
+
+        const categories = collectCategories();
+        if (categories.length === 0) {
+            alert('Please add at least one category.');
+            return;
+        }
+        const hasInvalidCategory = categories.some(category => category.candidates.length === 0);
+        if (hasInvalidCategory) {
+            alert('Every category must have at least one candidate. (You can save with one for now ~ just remember every category needs at least 2 before you can start the election.)');
+            return;
+        }
+
+        const res = await fetch(`/api/admin/election/${electionId}`, {
+            method: 'PUT',
+            headers: authHeaders(),
+            body: JSON.stringify({ title, categories })
+        });
+        if (handleAuthFailure(res)) return;
+
+        const data = await res.json();
+        if (res.ok) {
+            clearFormDirty();
+            loadElection();
+        } else {
+            alert(data.error || 'Failed to save changes.');
+        }
+    }
+
+    // Any typed change inside the edit form (title, category name, candidate
+    // name/party) marks the form dirty too ~ not just add/delete clicks.
+    document.getElementById('editSection').addEventListener('input', (e) => {
+        if (e.target.matches('#editTitleInput, .cat-name, .candidate-name, .candidate-party')) {
+            markFormDirty();
+        }
+    });
+
+    // Warn on closing the tab/navigating away with unsaved edits, so a
+    // forgotten "Save Changes" click doesn't quietly lose the changes.
+    window.addEventListener('beforeunload', (e) => {
+        if (formDirty) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    });
+
+    loadElection();
+    setInterval(updateCountdown, 1000);
+
+    startInactivityGuard({
+        onTimeout: () => {
+            alert('You have been signed out due to inactivity.');
+            localStorage.removeItem('adminToken');
+            window.location.href = '/admin-login.html';
+        }
+    });
+</script>
+
+</body>
+</html>

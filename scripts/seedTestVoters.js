@@ -2,7 +2,7 @@ require("dotenv").config();
 const bcrypt = require("bcryptjs");
 const db = require("../config/db");
 
-// Test accounts — plaintext password shown here is what you type into
+// Test accounts ~ plaintext password shown here is what you type into
 // the login form. The script hashes it before storing it, exactly like
 // real registration does. is_verified is set to 1 directly, so these
 // accounts skip the OTP-email step entirely.

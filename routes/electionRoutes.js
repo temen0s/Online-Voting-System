@@ -5,7 +5,7 @@ const { verifyVotingToken } = require("../middleware/auth");
 
 // Public read endpoints
 router.get("/elections/overview", electionController.electionsOverview);
-router.get("/election/active", electionController.activeElection);
+router.get("/election/:id/ballot", electionController.electionBallot);
 router.get("/election/:id/results", electionController.electionResults);
 
 // Voter-protected endpoints

@@ -253,6 +253,9 @@ mobile design.
 - MySQL user should have only the privileges this app needs (not `root`
   with a blank password, which is fine for local XAMPP dev only).
 
+```
+to get test voters RUN scripts/seedTestVoters.js
+```
 
 *//Test Students:
 Seeded: STU1001 / password: test1234

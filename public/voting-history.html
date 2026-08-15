@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voting History - Online Voting System</title>
+    <script>
+        // Check Voter Session Token (same pattern admin.html uses)
+        if (!localStorage.getItem('voterToken')) {
+            window.location.href = '/';
+        }
+    </script>
+    <link rel="stylesheet" href="/styles.css">
+    <style>
+        /* Page-specific only ~ everything else lives in styles.css */
+        .container { --container-width: 750px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div id="studentNav"></div>
+
+    <div class="section">
+        <h3>Voting History</h3>
+        <p class="helper-text">
+            Elections you've cast a ballot in, and when. This system keeps ballots anonymous by design
+            (see the project README) ~ the server can confirm <em>that</em> you voted in an election, never
+            <em>who</em> you voted for. Receipt hashes below are proof-of-participation codes only; they don't
+            reveal your candidate choices, and they're only shown here if this is the same browser you voted
+            from, since they're saved locally rather than on the server.
+        </p>
+        <div id="historyList">
+            <p class="loading">Loading your voting history…</p>
+        </div>
+    </div>
+</div>
+
+<script src="/inactivity-guard.js"></script>
+<script src="/student-common.js"></script>
+<script>
+    const voterToken = requireVoterAuth();
+    renderStudentNav('history');
+
+    function statusBadge(status) {
+        const labels = { active: '🔴 LIVE', closed: 'Closed', draft: 'Draft' };
+        return `<span class="badge badge-${status}">${labels[status] || status}</span>`;
+    }
+
+    function formatDateTime(value) {
+        if (!value) return '—';
+        return new Date(value).toLocaleString();
+    }
+
+    async function loadHistory() {
+        const res = await fetch('/api/voter/history', { headers: studentAuthHeaders() });
+        if (handleAuthFailure(res)) return;
+
+        const container = document.getElementById('historyList');
+
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            container.innerHTML = `<p class="empty-state">${escapeHtml(errData.error || 'Could not load your voting history.')}</p>`;
+            return;
+        }
+
+        const data = await res.json();
+        const history = data.history || [];
+
+        if (history.length === 0) {
+            container.innerHTML = '<p class="empty-state">You haven\'t voted in any elections yet. Head to Elections to cast your first ballot.</p>';
+            return;
+        }
+
+        container.innerHTML = '';
+        history.forEach(item => {
+            const local = getLocalReceipts(item.election_id);
+            const card = document.createElement('div');
+            card.className = 'history-card';
+
+            let receiptsHtml = '';
+            if (local && local.hashes && local.hashes.length > 0) {
+                receiptsHtml = `
+                    <div class="receipt-list">
+                        <div class="profile-field-label">Receipt Hash${local.hashes.length > 1 ? 'es' : ''} (saved on this device)</div>
+                        ${local.hashes.map(h => `<code class="receipt-code">${escapeHtml(h)}</code>`).join('')}
+                    </div>
+                `;
+            } else {
+                receiptsHtml = `<p class="hint">No receipt saved on this device for this election ~ it may have been cast elsewhere, or local storage was cleared since.</p>`;
+            }
+
+            card.innerHTML = `
+                <div class="election-card-top">
+                    <div>
+                        <span class="election-title">${escapeHtml(item.title)}</span>
+                        ${statusBadge(item.status)}
+                        <div class="election-meta">Voted on ${formatDateTime(item.voted_at)}</div>
+                    </div>
+                    <button type="button" class="btn btn-primary" onclick="window.location.href='/'">View Results</button>
+                </div>
+                ${receiptsHtml}
+            `;
+            container.appendChild(card);
+        });
+    }
+
+    loadHistory();
+
+    startInactivityGuard({
+        onTimeout: () => {
+            alert('You have been signed out due to inactivity.');
+            logoutStudent();
+        }
+    });
+</script>
+
+</body>
+</html>

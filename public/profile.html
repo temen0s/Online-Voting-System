@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Profile - Online Voting System</title>
+    <script>
+        // Check Voter Session Token (same pattern admin.html uses)
+        if (!localStorage.getItem('voterToken')) {
+            window.location.href = '/';
+        }
+    </script>
+    <link rel="stylesheet" href="/styles.css">
+    <style>
+        /* Page-specific only ~ everything else lives in styles.css */
+        .container { --container-width: 700px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div id="studentNav"></div>
+
+    <div class="section">
+        <h3>Account Details</h3>
+        <div id="profileView">
+            <p class="loading">Loading profile…</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <h3>Edit Profile</h3>
+        <p class="helper-text">Your current password confirms any change. Changing your email will require verifying it again with a fresh OTP, just like when you first registered.</p>
+
+        <div class="form-group">
+            <label>Full Name</label>
+            <input type="text" id="editFullName">
+        </div>
+        <div class="form-group">
+            <label>Email</label>
+            <input type="email" id="editEmail">
+        </div>
+        <div class="form-group">
+            <label>Current Password (required to save changes)</label>
+            <input type="password" id="editCurrentPassword" placeholder="Enter your current password">
+        </div>
+        <button onclick="saveProfile()" class="btn btn-primary">Save Changes</button>
+        <div id="profileMsg" class="msg"></div>
+    </div>
+
+    <!-- Shown only right after an email change, until the new address is verified -->
+    <div class="section" id="reverifySection" style="display:none;">
+        <h3>Verify Your New Email</h3>
+        <p class="helper-text">We sent a 6-digit code to <strong id="reverifyEmailDisplay"></strong>. Enter it below to finish updating your email.</p>
+        <div class="form-group">
+            <label>OTP Code</label>
+            <input type="text" id="reverifyOtp" placeholder="123456" maxlength="6">
+        </div>
+        <button onclick="submitReverifyOtp()" class="btn btn-success">Verify & Activate New Email</button>
+        <button onclick="resendReverifyOtp()" class="btn btn-link" style="margin-left:10px;">Resend code</button>
+        <div id="reverifyMsg" class="msg"></div>
+    </div>
+</div>
+
+<script src="/inactivity-guard.js"></script>
+<script src="/student-common.js"></script>
+<script>
+    const voterToken = requireVoterAuth();
+    renderStudentNav('profile');
+
+    let currentProfile = null;
+
+    function showMsg(elId, text, isError) {
+        const el = document.getElementById(elId);
+        el.textContent = text;
+        el.className = 'msg ' + (isError ? 'msg-error' : 'msg-success');
+        el.style.display = 'block';
+    }
+
+    async function loadProfile() {
+        const res = await fetch('/api/auth/profile', { headers: studentAuthHeaders() });
+        if (handleAuthFailure(res)) return;
+
+        if (!res.ok) {
+            document.getElementById('profileView').innerHTML = '<p class="empty-state">Could not load your profile.</p>';
+            return;
+        }
+
+        const data = await res.json();
+        currentProfile = data;
+
+        document.getElementById('profileView').innerHTML = `
+            <div class="profile-field">
+                <div class="profile-field-label">University ID</div>
+                <div class="profile-field-value">${escapeHtml(data.universityId)}</div>
+            </div>
+            <div class="profile-field">
+                <div class="profile-field-label">Full Name</div>
+                <div class="profile-field-value">${escapeHtml(data.fullName)}</div>
+            </div>
+            <div class="profile-field">
+                <div class="profile-field-label">Email</div>
+                <div class="profile-field-value">
+                    ${escapeHtml(data.email)}
+                    ${data.isVerified
+                        ? '<span class="verified-tag">✓ Verified</span>'
+                        : '<span class="unverified-tag">Pending verification</span>'}
+                </div>
+            </div>
+            <div class="profile-field">
+                <div class="profile-field-label">Registered</div>
+                <div class="profile-field-value">${new Date(data.createdAt).toLocaleDateString()}</div>
+            </div>
+        `;
+
+        document.getElementById('editFullName').value = data.fullName;
+        document.getElementById('editEmail').value = data.email;
+
+        // If a prior email change never got verified (e.g. the page was
+        // closed mid-flow), surface the re-verify panel again on load.
+        if (!data.isVerified) {
+            document.getElementById('reverifyEmailDisplay').textContent = data.email;
+            document.getElementById('reverifySection').style.display = 'block';
+        }
+    }
+
+    async function saveProfile() {
+        const fullName = document.getElementById('editFullName').value.trim();
+        const email = document.getElementById('editEmail').value.trim();
+        const currentPassword = document.getElementById('editCurrentPassword').value;
+
+        if (!fullName || !email || !currentPassword) {
+            showMsg('profileMsg', 'Please fill in your name, email, and current password.', true);
+            return;
+        }
+
+        const res = await fetch('/api/auth/profile', {
+            method: 'PUT',
+            headers: studentAuthHeaders(),
+            body: JSON.stringify({ fullName, email, currentPassword })
+        });
+        if (handleAuthFailure(res)) return;
+
+        const data = await res.json();
+        if (res.ok) {
+            showMsg('profileMsg', data.message, false);
+            document.getElementById('editCurrentPassword').value = '';
+
+            if (data.emailChanged) {
+                document.getElementById('reverifyEmailDisplay').textContent = email;
+                document.getElementById('reverifySection').style.display = 'block';
+                document.getElementById('reverifyOtp').focus();
+            } else {
+                document.getElementById('reverifySection').style.display = 'none';
+            }
+            loadProfile();
+        } else {
+            showMsg('profileMsg', data.error || 'Failed to update profile.', true);
+        }
+    }
+
+    async function submitReverifyOtp() {
+        const otp = document.getElementById('reverifyOtp').value.trim();
+        if (!otp) {
+            showMsg('reverifyMsg', 'Please enter the OTP code.', true);
+            return;
+        }
+
+        const res = await fetch('/api/auth/verify-profile-otp', {
+            method: 'POST',
+            headers: studentAuthHeaders(),
+            body: JSON.stringify({ otp })
+        });
+        if (handleAuthFailure(res)) return;
+
+        const data = await res.json();
+        if (res.ok) {
+            showMsg('reverifyMsg', data.message, false);
+            document.getElementById('reverifySection').style.display = 'none';
+            document.getElementById('reverifyOtp').value = '';
+            loadProfile();
+        } else {
+            showMsg('reverifyMsg', data.error || 'Verification failed.', true);
+        }
+    }
+
+    async function resendReverifyOtp() {
+        const res = await fetch('/api/auth/resend-profile-otp', {
+            method: 'POST',
+            headers: studentAuthHeaders()
+        });
+        if (handleAuthFailure(res)) return;
+        const data = await res.json();
+        showMsg('reverifyMsg', res.ok ? data.message : (data.error || 'Could not resend OTP.'), !res.ok);
+    }
+
+    loadProfile();
+
+    startInactivityGuard({
+        onTimeout: () => {
+            alert('You have been signed out due to inactivity.');
+            logoutStudent();
+        }
+    });
+</script>
+
+</body>
+</html>

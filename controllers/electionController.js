@@ -362,6 +362,33 @@ async function voterStatus(req, res) {
   }
 }
 
+// Get Voting History ~ every election a student has participated in.
+// Deliberately returns only *that* a ballot was cast and *when*
+// (sourced from election_votes), never which candidate. ballot_box
+// carries no link back to university_id by design (see schema notes
+// in Voting_system.sql), so the server has no way to hand candidate
+// choices back out after the fact without breaking ballot anonymity.
+// If a student wants to see the receipt hash(es) for a specific vote,
+// those were returned once at cast time (see castVote below) and are
+// saved client-side only ~ the student portal's voting-history page
+// merges them in from localStorage rather than from this endpoint.
+async function votingHistory(req, res) {
+  try {
+    const [rows] = await db.query(
+      `SELECT ev.election_id, ev.voted_at, e.title, e.status, e.started_at, e.ended_at
+       FROM election_votes ev
+       JOIN elections e ON e.election_id = ev.election_id
+       WHERE ev.university_id = ?
+       ORDER BY ev.voted_at DESC`,
+      [req.voterSession.universityId]
+    );
+    res.json({ history: rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to load voting history." });
+  }
+}
+
 // Get All Elections (Active & Closed Overview) ~ shown to students.
 async function electionsOverview(req, res) {
   try {
@@ -520,6 +547,7 @@ module.exports = {
   endElection,
   deleteElection,
   voterStatus,
+  votingHistory,
   electionsOverview,
   electionBallot,
   electionResults,

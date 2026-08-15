@@ -10,6 +10,7 @@ router.get("/election/:id/results", electionController.electionResults);
 
 // Voter-protected endpoints
 router.get("/voter/status", verifyVotingToken, electionController.voterStatus);
+router.get("/voter/history", verifyVotingToken, electionController.votingHistory);
 router.post("/vote", verifyVotingToken, electionController.castVote);
 
 module.exports = router;

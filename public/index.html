@@ -73,10 +73,7 @@
     </div>
 
     <div id="dashboardSection" style="display: none;">
-        <div class="header-bar">
-            <h2>Student Dashboard</h2>
-            <button onclick="logout()" class="btn btn-danger">Logout</button>
-        </div>
+        <div id="studentNav"></div>
 
         <h3>Elections Overview</h3>
         <div id="electionsList"></div>
@@ -260,6 +257,7 @@
     function showDashboard() {
         document.getElementById('authSection').style.display = 'none';
         document.getElementById('dashboardSection').style.display = 'block';
+        renderDashboardNav();
         loadElectionsList();
         startInactivityGuard({
             onTimeout: () => {
@@ -267,6 +265,61 @@
                 logout();
             }
         });
+    }
+
+    // Same nav markup/behavior as the shared one in student-common.js
+    // (used by profile.html, voting-history.html, change-password.html),
+    // kept as a local copy here so this page doesn't have to load an
+    // extra script or risk its own escapeHtml/logout definitions
+    // clashing with equivalently-named ones elsewhere.
+    function renderDashboardNav() {
+        const pages = [
+            { key: 'dashboard', href: '/', label: 'Elections' },
+            { key: 'profile', href: '/profile.html', label: 'Profile' },
+            { key: 'history', href: '/voting-history.html', label: 'Voting History' },
+            { key: 'password', href: '/change-password.html', label: 'Change Password' },
+        ];
+        const nav = document.getElementById('studentNav');
+        if (!nav) return;
+        nav.innerHTML = `
+            <div class="header-bar">
+                <div class="student-nav-links">
+                    ${pages.map(p => `<a href="${p.href}" class="student-nav-link${p.key === 'dashboard' ? ' active' : ''}">${p.label}</a>`).join('')}
+                </div>
+                <button onclick="logout()" class="btn btn-danger">Logout</button>
+            </div>
+        `;
+    }
+
+    // Reads the (unverified, client-side-only) universityId claim out
+    // of the voter JWT, just to scope localStorage keys per-student on
+    // a shared device. Never used for anything security-relevant ~
+    // every real check happens server-side against the signed token.
+    function getVoterUniversityId() {
+        if (!voterToken) return null;
+        try {
+            const payload = JSON.parse(atob(voterToken.split('.')[1]));
+            return payload.universityId || null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // Saves the receipt hashes handed back by POST /api/vote so the
+    // Voting History page can show them later. This is deliberately a
+    // browser-only record: ballot_box carries no link back to
+    // university_id (see Voting_system.sql), so the server itself has
+    // no way to answer "what were my receipts?" after the fact without
+    // undermining that anonymity. Saved once, here, at the only moment
+    // the server ever reveals them to this voter.
+    function saveReceiptsLocally(electionId, hashes) {
+        const uid = getVoterUniversityId();
+        if (!uid || !hashes || hashes.length === 0) return;
+        const key = `voteReceipts:${uid}`;
+        let store = {};
+        try { store = JSON.parse(localStorage.getItem(key) || '{}'); } catch (e) { store = {}; }
+        store[electionId] = { hashes, savedAt: new Date().toISOString() };
+        localStorage.setItem(key, JSON.stringify(store));
     }
 
     async function loadElectionsList() {
@@ -373,7 +426,8 @@
 
         const data = await res.json();
         if (res.ok) {
-            alert('Vote submitted successfully!');
+            saveReceiptsLocally(electionId, data.receipts);
+            alert('Vote submitted successfully! You can find your receipt under Voting History.');
             viewElection(electionId, 'active');
         } else {
             alert(data.error || 'Failed to submit vote.');

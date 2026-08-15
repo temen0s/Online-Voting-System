@@ -652,6 +652,100 @@ button:disabled {
 }
 
 /* =========================================================
+   STUDENT PORTAL NAV
+   Shared across profile.html, voting-history.html, and
+   change-password.html via student-common.js. index.html and the
+   admin pages have their own header-bar contents and don't use this.
+   ========================================================= */
+
+.student-nav-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 18px;
+}
+
+.student-nav-link {
+    color: var(--color-text-muted);
+    text-decoration: none;
+    font-weight: bold;
+    font-size: 14px;
+    padding-bottom: 4px;
+    border-bottom: 3px solid transparent;
+}
+
+.student-nav-link:hover {
+    color: var(--color-primary);
+}
+
+.student-nav-link.active {
+    color: var(--color-primary);
+    border-bottom-color: var(--color-primary);
+}
+
+/* =========================================================
+   PROFILE / VOTING HISTORY
+   ========================================================= */
+
+.profile-field {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--color-border-faint);
+}
+
+.profile-field:last-child {
+    border-bottom: none;
+}
+
+.profile-field-label {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-small);
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.profile-field-value {
+    font-size: 15px;
+    margin-top: 2px;
+}
+
+.verified-tag {
+    color: var(--color-success);
+    font-weight: bold;
+    font-size: var(--font-size-small);
+}
+
+.unverified-tag {
+    color: var(--color-warning-text);
+    font-weight: bold;
+    font-size: var(--font-size-small);
+}
+
+.history-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin-top: 12px;
+}
+
+.receipt-list {
+    margin-top: 8px;
+}
+
+.receipt-code {
+    display: block;
+    font-family: "Courier New", monospace;
+    font-size: var(--font-size-tiny);
+    color: var(--color-text-muted);
+    background: var(--color-surface-subtle);
+    border: 1px solid var(--color-border-faint);
+    border-radius: var(--radius-sm);
+    padding: 6px 8px;
+    margin-top: 4px;
+    word-break: break-all;
+}
+
+/* =========================================================
    RESPONSIVE
    Starting point only. Students overwhelmingly vote on phones,
    so this is the surface most worth designing properly.

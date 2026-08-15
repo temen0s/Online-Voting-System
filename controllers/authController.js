@@ -225,4 +225,238 @@ function verifySession(req, res) {
   res.json({ valid: true, universityId: req.voterSession.universityId });
 }
 
-module.exports = { register, verifyOtp, resendOtp, login, verifySession };
+/**
+ * Returns the logged-in student's own profile.
+ * Route: GET /api/auth/profile (voter token required)
+ */
+async function getProfile(req, res) {
+  try {
+    const [rows] = await db.query(
+      "SELECT university_id, full_name, email, is_verified, created_at FROM voter_identity WHERE university_id = ?",
+      [req.voterSession.universityId]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "Account not found." });
+    }
+    const voter = rows[0];
+    return res.status(200).json({
+      universityId: voter.university_id,
+      fullName: voter.full_name,
+      email: voter.email,
+      isVerified: Boolean(voter.is_verified),
+      createdAt: voter.created_at,
+    });
+  } catch (err) {
+    console.error("Get profile error:", err);
+    return res.status(500).json({ error: "Server error while loading profile." });
+  }
+}
+
+/**
+ * Updates full name and/or email. Requires the current password as
+ * confirmation ~ this is an account-security-relevant action, so a
+ * bare voter JWT (which could be sitting in an unlocked browser tab)
+ * shouldn't be enough on its own. Changing the email re-locks the
+ * account behind OTP verification, exactly like registration did,
+ * so a session token alone can't redirect future OTPs to a different
+ * inbox without the real password.
+ * Route: PUT /api/auth/profile (voter token required)
+ * Body: { fullName, email, currentPassword }
+ */
+async function updateProfile(req, res) {
+  try {
+    const { fullName, email, currentPassword } = req.body;
+    const { universityId } = req.voterSession;
+
+    if (!fullName || !email || !currentPassword) {
+      return res.status(400).json({ error: "Full name, email, and current password are required." });
+    }
+
+    const [rows] = await db.query("SELECT * FROM voter_identity WHERE university_id = ?", [universityId]);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "Account not found." });
+    }
+    const voter = rows[0];
+
+    const isMatch = await bcrypt.compare(currentPassword, voter.password);
+    if (!isMatch) {
+      return res.status(401).json({ error: "Current password is incorrect." });
+    }
+
+    const trimmedName = fullName.trim();
+    const normalizedEmail = email.toLowerCase().trim();
+    const emailChanged = normalizedEmail !== voter.email;
+
+    if (emailChanged) {
+      const [existingByEmail] = await db.query(
+        "SELECT university_id FROM voter_identity WHERE email = ? AND university_id != ?",
+        [normalizedEmail, universityId]
+      );
+      if (existingByEmail.length > 0) {
+        return res.status(409).json({ error: "This email is already registered to another university ID." });
+      }
+
+      const otp = generateOtp();
+      const otpExpiresAt = new Date(Date.now() + OTP_EXPIRES_MINUTES * 60 * 1000);
+
+      await db.query(
+        `UPDATE voter_identity
+         SET full_name = ?, email = ?, is_verified = 0, otp = ?, otp_expires_at = ?
+         WHERE university_id = ?`,
+        [trimmedName, normalizedEmail, otp, otpExpiresAt, universityId]
+      );
+
+      await sendOtpEmail(normalizedEmail, otp, trimmedName);
+
+      return res.status(200).json({
+        message: "Profile saved. Your new email needs to be verified ~ we sent a fresh OTP to it.",
+        emailChanged: true,
+      });
+    }
+
+    await db.query("UPDATE voter_identity SET full_name = ? WHERE university_id = ?", [trimmedName, universityId]);
+    return res.status(200).json({ message: "Profile updated.", emailChanged: false });
+  } catch (err) {
+    console.error("Update profile error:", err);
+    return res.status(500).json({ error: "Server error while updating profile." });
+  }
+}
+
+/**
+ * Re-verifies a new email set via updateProfile, using the same OTP
+ * mechanism as registration. Kept as its own endpoint (rather than
+ * reusing /verify-otp) so the profile page can call something that's
+ * explicitly scoped to the logged-in voter's own session instead of
+ * taking a bare universityId in the body.
+ * Route: POST /api/auth/verify-profile-otp (voter token required)
+ * Body: { otp }
+ */
+async function verifyProfileOtp(req, res) {
+  try {
+    const { otp } = req.body;
+    const { universityId } = req.voterSession;
+    if (!otp) {
+      return res.status(400).json({ error: "OTP is required." });
+    }
+
+    const [rows] = await db.query("SELECT * FROM voter_identity WHERE university_id = ?", [universityId]);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "Account not found." });
+    }
+    const voter = rows[0];
+
+    if (voter.is_verified) {
+      return res.status(400).json({ error: "Your email is already verified." });
+    }
+    if (!voter.otp || !voter.otp_expires_at) {
+      return res.status(400).json({ error: "No active OTP. Please resend and try again." });
+    }
+    if (new Date(voter.otp_expires_at) < new Date()) {
+      return res.status(400).json({ error: "OTP has expired. Please resend and try again." });
+    }
+    if (voter.otp !== otp) {
+      return res.status(400).json({ error: "Incorrect OTP." });
+    }
+
+    await db.query(
+      "UPDATE voter_identity SET is_verified = 1, otp = NULL, otp_expires_at = NULL WHERE university_id = ?",
+      [universityId]
+    );
+
+    return res.status(200).json({ message: "Email verified successfully." });
+  } catch (err) {
+    console.error("Verify profile OTP error:", err);
+    return res.status(500).json({ error: "Server error during OTP verification." });
+  }
+}
+
+/**
+ * Resends a fresh OTP for a new email set via updateProfile. Voter-
+ * session-scoped counterpart to /resend-otp for the same reason
+ * verifyProfileOtp exists separately from /verify-otp.
+ * Route: POST /api/auth/resend-profile-otp (voter token required)
+ */
+async function resendProfileOtp(req, res) {
+  try {
+    const { universityId } = req.voterSession;
+    const [rows] = await db.query("SELECT * FROM voter_identity WHERE university_id = ?", [universityId]);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "Account not found." });
+    }
+    const voter = rows[0];
+    if (voter.is_verified) {
+      return res.status(400).json({ error: "Your email is already verified." });
+    }
+
+    const otp = generateOtp();
+    const otpExpiresAt = new Date(Date.now() + OTP_EXPIRES_MINUTES * 60 * 1000);
+
+    await db.query(
+      "UPDATE voter_identity SET otp = ?, otp_expires_at = ? WHERE university_id = ?",
+      [otp, otpExpiresAt, universityId]
+    );
+
+    await sendOtpEmail(voter.email, otp, voter.full_name);
+
+    return res.status(200).json({ message: "A new OTP has been sent to your email." });
+  } catch (err) {
+    console.error("Resend profile OTP error:", err);
+    return res.status(500).json({ error: "Server error while resending OTP." });
+  }
+}
+
+/**
+ * Changes the account password. Requires the current password.
+ * Route: POST /api/auth/change-password (voter token required)
+ * Body: { currentPassword, newPassword }
+ */
+async function changePassword(req, res) {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const { universityId } = req.voterSession;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: "Current password and new password are required." });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: "New password must be at least 6 characters." });
+    }
+
+    const [rows] = await db.query("SELECT * FROM voter_identity WHERE university_id = ?", [universityId]);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "Account not found." });
+    }
+    const voter = rows[0];
+
+    const isMatch = await bcrypt.compare(currentPassword, voter.password);
+    if (!isMatch) {
+      return res.status(401).json({ error: "Current password is incorrect." });
+    }
+
+    const isSame = await bcrypt.compare(newPassword, voter.password);
+    if (isSame) {
+      return res.status(400).json({ error: "New password must be different from your current password." });
+    }
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await db.query("UPDATE voter_identity SET password = ? WHERE university_id = ?", [hashed, universityId]);
+
+    return res.status(200).json({ message: "Password changed successfully." });
+  } catch (err) {
+    console.error("Change password error:", err);
+    return res.status(500).json({ error: "Server error while changing password." });
+  }
+}
+
+module.exports = {
+  register,
+  verifyOtp,
+  resendOtp,
+  login,
+  verifySession,
+  getProfile,
+  updateProfile,
+  verifyProfileOtp,
+  resendProfileOtp,
+  changePassword,
+};
